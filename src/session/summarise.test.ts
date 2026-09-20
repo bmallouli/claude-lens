@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { summariseSession } from './summarise.js';
 
-/** A transcript carrying one of every shape a session list has to survive. */
+/** The mixed transcript the ticket's acceptance case spans, in its order. */
 const MIXED_TRANSCRIPT = [
   '{"type":"custom-title","sessionId":"s1","customTitle":"x"}',
   '{"type":"user","sessionId":"s1","cwd":"/w","timestamp":"2026-01-01T00:00:00.000Z"}',
@@ -79,6 +79,17 @@ describe('summariseSession', () => {
     expect(summary.startedAt).toBe('2026-01-01T01:00:00+01:00');
     expect(summary.endedAt).toBe('2026-01-01T00:30:00.000Z');
     expect(summary.durationMs).toBe(1_800_000);
+  });
+
+  it('keeps the first spelling of an instant two records both name', () => {
+    const summary = summariseSession([
+      '{"type":"user","timestamp":"2026-01-01T01:00:00+01:00"}',
+      '{"type":"assistant","timestamp":"2026-01-01T00:00:00.000Z"}',
+    ]);
+
+    expect(summary.startedAt).toBe('2026-01-01T01:00:00+01:00');
+    expect(summary.endedAt).toBe('2026-01-01T01:00:00+01:00');
+    expect(summary.durationMs).toBe(0);
   });
 
   it('reports no duration when a single record carries a timestamp', () => {
