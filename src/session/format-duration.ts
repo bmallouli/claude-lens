@@ -29,7 +29,12 @@ export function formatDuration(ms: number): string {
     return `${minutes}m ${seconds}s`;
   }
 
-  const hours = Math.floor(ms / HOUR_MS);
-  const minutes = Math.floor((ms - hours * HOUR_MS) / MINUTE_MS);
+  // Hours are unbounded, so a large enough duration exceeds the integers a
+  // double represents exactly and the division and subtraction below would
+  // drift far enough to yield a negative minute component. BigInt keeps the
+  // quotient and remainder exact for every duration the guard above admits.
+  const wholeMs = BigInt(Math.floor(ms));
+  const hours = wholeMs / BigInt(HOUR_MS);
+  const minutes = (wholeMs % BigInt(HOUR_MS)) / BigInt(MINUTE_MS);
   return `${hours}h ${minutes}m`;
 }
