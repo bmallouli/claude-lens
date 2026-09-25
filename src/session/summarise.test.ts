@@ -26,6 +26,9 @@ describe('summariseSession', () => {
       userMessages: 1,
       assistantMessages: 3,
       models: ['m1', 'm2'],
+      costUSD: 0,
+      totalTokens: 0,
+      toolCalls: 0,
       unreadable: 2,
     });
   });
@@ -40,6 +43,9 @@ describe('summariseSession', () => {
       userMessages: 0,
       assistantMessages: 0,
       models: [],
+      costUSD: 0,
+      totalTokens: 0,
+      toolCalls: 0,
       unreadable: 0,
     });
   });
@@ -165,5 +171,22 @@ describe('summariseSession', () => {
     expect(summary.assistantMessages).toBe(0);
     expect(summary.models).toEqual([]);
     expect(summary.durationMs).toBe(20_000);
+  });
+
+  it('sums recorded costs, all usage token types, and tool-use blocks on assistant records', () => {
+    const summary = summariseSession([
+      JSON.stringify({ type: 'user', costUSD: 10, message: { usage: { input_tokens: 100 } } }),
+      JSON.stringify({ type: 'assistant', costUSD: 0.4, message: {
+        usage: { input_tokens: 3, output_tokens: 5, cache_creation_input_tokens: 7, cache_read_input_tokens: 11 },
+        content: [{ type: 'text' }, { type: 'tool_use' }, { type: 'tool_use' }],
+      } }),
+      JSON.stringify({ type: 'assistant', costUSD: 0.6, message: {
+        usage: { input_tokens: 2, output_tokens: 4 }, content: [{ type: 'tool_result' }],
+      } }),
+    ]);
+
+    expect(summary.costUSD).toBe(1);
+    expect(summary.totalTokens).toBe(32);
+    expect(summary.toolCalls).toBe(2);
   });
 });
