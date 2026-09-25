@@ -1,18 +1,42 @@
-import { readdir, readFile } from 'node:fs/promises';
+import { readdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { formatDuration } from './session/format-duration.js';
 import { summariseSession } from './session/summarise.js';
 import type { SessionSummary } from './session/summarise.js';
 
-async function transcripts(directory: string): Promise<string[]> {
+type Writer = { write(chunk: string): unknown };
+
+/**
+ * Every `*.jsonl` file under `directory`, following symlinks to files but not
+ * to directories (which could form a cycle). A nested directory or symlink
+ * that cannot be read is reported on stderr and skipped; only a failure to
+ * read the top-level directory itself is thrown.
+ */
+async function transcripts(directory: string, stderr: Writer, nested = false): Promise<string[]> {
+  let entries;
+  try {
+    entries = await readdir(directory, { withFileTypes: true });
+  } catch (error) {
+    if (!nested) throw error;
+    stderr.write(`${directory}: ${reason(error)}\n`);
+    return [];
+  }
   const files: string[] = [];
-  for (const entry of await readdir(directory, { withFileTypes: true })) {
+  for (const entry of entries) {
     const path = join(directory, entry.name);
     if (entry.isDirectory()) {
-      files.push(...await transcripts(path));
-    } else if (entry.isFile() && entry.name.endsWith('.jsonl')) {
-      files.push(path);
+      files.push(...await transcripts(path, stderr, true));
+    } else if (entry.name.endsWith('.jsonl')) {
+      if (entry.isFile()) {
+        files.push(path);
+      } else if (entry.isSymbolicLink()) {
+        try {
+          if ((await stat(path)).isFile()) files.push(path);
+        } catch (error) {
+          stderr.write(`${path}: ${reason(error)}\n`);
+        }
+      }
     }
   }
   return files;
@@ -35,12 +59,12 @@ function reason(error: unknown): string {
 /** Print one tab-separated row per readable transcript, highest cost first. */
 export async function listSessions(
   directory: string,
-  stdout: { write(chunk: string): unknown } = process.stdout,
-  stderr: { write(chunk: string): unknown } = process.stderr,
+  stdout: Writer = process.stdout,
+  stderr: Writer = process.stderr,
 ): Promise<number> {
   let files: string[];
   try {
-    files = await transcripts(directory);
+    files = await transcripts(directory, stderr);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
       stdout.write(`no sessions found under ${directory}\n`);

@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -89,5 +89,47 @@ describe('sessions listing', () => {
     const stdout = capture();
     expect(await listSessions(dir, stdout)).toBe(1);
     expect(stdout.text).toBe(`no sessions found under ${dir}\n`);
+  });
+
+  it.skipIf(process.getuid?.() === 0)('reports an unreadable subdirectory and still lists the rest', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'claude-lens-'));
+    const locked = join(dir, 'locked');
+    try {
+      await mkdir(locked);
+      await writeFile(join(locked, 'hidden.jsonl'), transcript('hidden', 1, 5, 0).join('\n') + '\n');
+      await writeFile(join(dir, 'ok.jsonl'), transcript('ok', 0.5, 5, 0).join('\n') + '\n');
+      await chmod(locked, 0o000);
+
+      const stdout = capture();
+      const stderr = capture();
+      expect(await listSessions(dir, stdout, stderr)).toBe(0);
+
+      expect(stdout.text.trimEnd().split('\n').map((row) => row.split('\t')[0])).toEqual(['ok']);
+      expect(stderr.text).toMatch(new RegExp(`^${locked.replace(/[\\^$.*+?()[\]{}|]/g, '\\$&')}: EACCES`));
+      expect(stderr.text.trimEnd().split('\n')).toHaveLength(1);
+    } finally {
+      await chmod(locked, 0o700).catch(() => {});
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('lists a symlinked transcript but does not follow a symlinked directory', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'claude-lens-'));
+    const elsewhere = await mkdtemp(join(tmpdir(), 'claude-lens-'));
+    try {
+      await writeFile(join(elsewhere, 'real.jsonl'), transcript('linked', 1, 5, 0).join('\n') + '\n');
+      await symlink(join(elsewhere, 'real.jsonl'), join(dir, 'link.jsonl'));
+      await symlink(elsewhere, join(dir, 'linkdir'));
+
+      const stdout = capture();
+      const stderr = capture();
+      expect(await listSessions(dir, stdout, stderr)).toBe(0);
+
+      expect(stdout.text.trimEnd().split('\n').map((row) => row.split('\t')[0])).toEqual(['linked']);
+      expect(stderr.text).toBe('');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+      await rm(elsewhere, { recursive: true, force: true });
+    }
   });
 });
