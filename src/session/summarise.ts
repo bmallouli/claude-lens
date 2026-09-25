@@ -16,6 +16,12 @@ export interface SessionSummary {
   assistantMessages: number;
   /** Each distinct `message.model` on an assistant record, in first-seen order. */
   models: string[];
+  /** Sum of recorded assistant `costUSD` amounts, in dollars. */
+  costUSD: number;
+  /** Sum of assistant input, output and cache token usage. */
+  totalTokens: number;
+  /** Number of assistant `tool_use` content blocks. */
+  toolCalls: number;
   /** Lines that are not a JSON object. */
   unreadable: number;
 }
@@ -82,6 +88,18 @@ function modelOf(record: TranscriptRecord): string | undefined {
   return stringField(message as TranscriptRecord, 'model');
 }
 
+function objectField(record: TranscriptRecord, key: string): TranscriptRecord | undefined {
+  const value = record[key];
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? value as TranscriptRecord
+    : undefined;
+}
+
+function nonNegativeNumber(record: TranscriptRecord, key: string): number {
+  const value = record[key];
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : 0;
+}
+
 /**
  * Summarise one session transcript from its JSONL lines.
  *
@@ -102,6 +120,9 @@ export function summariseSession(lines: string[]): SessionSummary {
   let stamped = 0;
   let userMessages = 0;
   let assistantMessages = 0;
+  let costUSD = 0;
+  let totalTokens = 0;
+  let toolCalls = 0;
   const models = new Set<string>();
   let unreadable = 0;
 
@@ -142,6 +163,22 @@ export function summariseSession(lines: string[]): SessionSummary {
       if (model !== undefined) {
         models.add(model);
       }
+      costUSD += nonNegativeNumber(record, 'costUSD');
+      const message = objectField(record, 'message');
+      if (message !== undefined) {
+        const usage = objectField(message, 'usage');
+        if (usage !== undefined) {
+          for (const key of ['input_tokens', 'output_tokens', 'cache_creation_input_tokens', 'cache_read_input_tokens']) {
+            totalTokens += nonNegativeNumber(usage, key);
+          }
+        }
+        const content = message['content'];
+        if (Array.isArray(content)) {
+          toolCalls += content.filter((block: unknown) =>
+            typeof block === 'object' && block !== null && !Array.isArray(block) &&
+            (block as TranscriptRecord)['type'] === 'tool_use').length;
+        }
+      }
     }
   }
 
@@ -159,6 +196,9 @@ export function summariseSession(lines: string[]): SessionSummary {
     userMessages,
     assistantMessages,
     models: [...models],
+    costUSD,
+    totalTokens,
+    toolCalls,
     unreadable,
   };
 }

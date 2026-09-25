@@ -3,15 +3,20 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "bin": {
+    "claude-lens": "dist/cli.js"
+  },
   "packageManager": "pnpm@10.29.3",
   "engines": {
     "node": ">=22"
   },
   "scripts": {
+    "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
   "devDependencies": {
+    "@types/node": "^22.20.4",
     "typescript": "^7.0.2",
     "vitest": "^5.0.1"
   }

@@ -9,6 +9,8 @@
     "isolatedModules": true,
     "resolveJsonModule": true,
     "skipLibCheck": true,
+    "types": ["node"],
+    "rootDir": "src",
     "noEmit": true,
 
     "strict": true,
