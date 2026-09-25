@@ -132,4 +132,21 @@ describe('sessions listing', () => {
       await rm(elsewhere, { recursive: true, force: true });
     }
   });
+
+  it('lists a transcript once when a symlink to it lies in the same tree', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'claude-lens-'));
+    try {
+      await writeFile(join(dir, 'real.jsonl'), transcript('s', 1, 5, 0).join('\n') + '\n');
+      await symlink(join(dir, 'real.jsonl'), join(dir, 'dup.jsonl'));
+
+      const stdout = capture();
+      const stderr = capture();
+      expect(await listSessions(dir, stdout, stderr)).toBe(0);
+
+      expect(stdout.text.trimEnd().split('\n').map((row) => row.split('\t')[0])).toEqual(['s']);
+      expect(stderr.text).toBe('');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });

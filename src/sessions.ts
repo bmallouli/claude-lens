@@ -1,4 +1,4 @@
-import { readdir, readFile, stat } from 'node:fs/promises';
+import { readdir, readFile, realpath, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { formatDuration } from './session/format-duration.js';
@@ -80,8 +80,13 @@ export async function listSessions(
   }
 
   const sessions: { path: string; summary: SessionSummary }[] = [];
+  // A transcript reached through both a symlink and its target is listed once.
+  const seen = new Set<string>();
   for (const path of files) {
     try {
+      const real = await realpath(path);
+      if (seen.has(real)) continue;
+      seen.add(real);
       const text = await readFile(path, 'utf8');
       const summary = summariseSession(text.split(/\r?\n/));
       if (summary.unreadable > 0) {
