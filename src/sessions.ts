@@ -18,6 +18,16 @@ async function transcripts(directory: string): Promise<string[]> {
   return files;
 }
 
+/**
+ * A transcript-sourced string made safe for one table cell: a tab or line
+ * break inside it would otherwise split its row into extra columns or rows,
+ * and a backslash is escaped too so a literal `\t` stays distinguishable.
+ */
+function cell(value: string): string {
+  return value.replace(/[\\\t\n\r]/g, (char) =>
+    ({ '\\': '\\\\', '\t': '\\t', '\n': '\\n', '\r': '\\r' })[char]!);
+}
+
 function reason(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -63,8 +73,8 @@ export async function listSessions(
   sessions.sort((a, b) => b.summary.costUSD - a.summary.costUSD || a.path.localeCompare(b.path));
   for (const { summary } of sessions) {
     stdout.write([
-      summary.sessionId ?? '-',
-      summary.cwd ?? '-',
+      cell(summary.sessionId ?? '-'),
+      cell(summary.cwd ?? '-'),
       `$${summary.costUSD.toFixed(2)}`,
       summary.totalTokens,
       summary.toolCalls,

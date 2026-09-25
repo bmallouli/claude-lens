@@ -189,4 +189,17 @@ describe('summariseSession', () => {
     expect(summary.totalTokens).toBe(32);
     expect(summary.toolCalls).toBe(2);
   });
+
+  it('counts a negative or nonnumeric cost or token amount as zero', () => {
+    const summary = summariseSession([
+      JSON.stringify({ type: 'assistant', costUSD: -5, message: {
+        usage: { input_tokens: -100, output_tokens: '7', cache_creation_input_tokens: null, cache_read_input_tokens: 2 },
+      } }),
+      JSON.stringify({ type: 'assistant', costUSD: '9', message: { usage: { input_tokens: 3, output_tokens: -1 } } }),
+      JSON.stringify({ type: 'assistant', costUSD: 0.25, message: { usage: { output_tokens: 1 } } }),
+    ]);
+
+    expect(summary.costUSD).toBe(0.25);
+    expect(summary.totalTokens).toBe(6);
+  });
 });

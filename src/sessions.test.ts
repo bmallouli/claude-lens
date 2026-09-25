@@ -56,6 +56,22 @@ describe('sessions listing', () => {
     }
   });
 
+  it('escapes tabs, line breaks and backslashes in the session id and cwd', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'claude-lens-'));
+    try {
+      await writeFile(join(dir, 'odd.jsonl'), [
+        JSON.stringify({ type: 'user', sessionId: 'a\nb', cwd: '/w\tx\\y\r', timestamp: '2026-01-01T00:00:00Z' }),
+      ].join('\n') + '\n');
+
+      const stdout = capture();
+      expect(await listSessions(dir, stdout, capture())).toBe(0);
+
+      expect(stdout.text).toBe(['a\\nb', '/w\\tx\\\\y\\r', '$0.00', 0, 0, formatDuration(0)].join('\t') + '\n');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it('prints a message for an empty directory with a successful exit', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'claude-lens-'));
     try {
