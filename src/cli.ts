@@ -1,11 +1,15 @@
 #!/usr/bin/env node
 import { listSessions } from './sessions.js';
+import { listTools } from './tools.js';
 
-if (process.argv.length !== 4 || process.argv[2] !== 'sessions') {
-  process.stderr.write('usage: claude-lens sessions <dir>\n');
+const commands = { sessions: listSessions, tools: listTools };
+const command = process.argv[2];
+
+if (process.argv.length !== 4 || (command !== 'sessions' && command !== 'tools')) {
+  process.stderr.write('usage: claude-lens sessions <dir>\n       claude-lens tools <dir>\n');
   process.exitCode = 1;
 } else {
-  listSessions(process.argv[3]!).then(
+  commands[command](process.argv[3]!).then(
     (code) => { process.exitCode = code; },
     (error: unknown) => {
       process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);

@@ -29,6 +29,26 @@ describe('claude-lens executable', () => {
     }
   });
 
+  it('lists tool calls and errors under a directory and exits 0', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'claude-lens-'));
+    try {
+      await writeFile(join(dir, 'one.jsonl'), JSON.stringify({ type: 'assistant',
+        message: { content: [{ type: 'tool_use', id: 't1', name: 'Bash' }] } }) + '\n');
+
+      const result = run('tools', dir);
+      expect(result.status).toBe(0);
+      expect(result.stdout).toBe('tool\tcalls\terrors\nBash\t1\t0\n');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('prints a usage line naming both subcommands and exits 1', () => {
+    const result = run('nope', '.');
+    expect(result.status).toBe(1);
+    expect(result.stderr.endsWith('usage: claude-lens sessions <dir>\n       claude-lens tools <dir>\n')).toBe(true);
+  });
+
   it('exits 1 for a missing directory', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'claude-lens-'));
     await rm(dir, { recursive: true });
