@@ -56,11 +56,12 @@ function reason(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** Print one tab-separated row per readable transcript, highest cost first. */
+/** Print one tab-separated row per readable transcript, highest cost first, at most `limit` of them. */
 export async function listSessions(
   directory: string,
   stdout: Writer = process.stdout,
   stderr: Writer = process.stderr,
+  limit = Infinity,
 ): Promise<number> {
   let files: string[];
   try {
@@ -100,7 +101,7 @@ export async function listSessions(
   }
 
   sessions.sort((a, b) => b.summary.costUSD - a.summary.costUSD || a.path.localeCompare(b.path));
-  for (const { summary } of sessions) {
+  for (const { summary } of sessions.slice(0, limit)) {
     stdout.write([
       cell(summary.sessionId ?? '-'),
       cell(summary.cwd ?? '-'),
