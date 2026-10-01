@@ -12,7 +12,7 @@ function parseArgs(args: string[]): { dir: string; limit: number } | { exit: num
       continue;
     }
     const value = args[++i];
-    if (value === undefined || !/^\d+$/.test(value) || !Number.isSafeInteger(Number(value)) || Number(value) < 1) {
+    if (value === undefined || !/^\d+$/.test(value) || Number(value) < 1) {
       return { exit: 2 };
     }
     limit = Number(value);
