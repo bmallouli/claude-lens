@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { formatDuration } from './session/format-duration.js';
 import { summariseSession } from './session/summarise.js';
 import { listSessions } from './sessions.js';
+import { sessionIds } from './test-support/session-ids.js';
 
 function capture() {
   let text = '';
@@ -104,7 +105,7 @@ describe('sessions listing', () => {
       const stderr = capture();
       expect(await listSessions(dir, stdout, stderr)).toBe(0);
 
-      expect(stdout.text.trimEnd().split('\n').map((row) => row.split('\t')[0])).toEqual(['ok']);
+      expect(sessionIds(stdout.text)).toEqual(['ok']);
       expect(stderr.text).toMatch(new RegExp(`^${locked.replace(/[\\^$.*+?()[\]{}|]/g, '\\$&')}: EACCES`));
       expect(stderr.text.trimEnd().split('\n')).toHaveLength(1);
     } finally {
@@ -125,7 +126,7 @@ describe('sessions listing', () => {
       const stderr = capture();
       expect(await listSessions(dir, stdout, stderr)).toBe(0);
 
-      expect(stdout.text.trimEnd().split('\n').map((row) => row.split('\t')[0])).toEqual(['linked']);
+      expect(sessionIds(stdout.text)).toEqual(['linked']);
       expect(stderr.text).toBe('');
     } finally {
       await rm(dir, { recursive: true, force: true });
@@ -143,7 +144,7 @@ describe('sessions listing', () => {
       const stderr = capture();
       expect(await listSessions(dir, stdout, stderr)).toBe(0);
 
-      expect(stdout.text.trimEnd().split('\n').map((row) => row.split('\t')[0])).toEqual(['s']);
+      expect(sessionIds(stdout.text)).toEqual(['s']);
       expect(stderr.text).toBe('');
     } finally {
       await rm(dir, { recursive: true, force: true });
