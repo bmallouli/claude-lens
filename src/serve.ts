@@ -115,12 +115,13 @@ function sessionPage(summary: SessionSummary, messages: DisplayedMessage[]): str
  * summary counted, so what the page omits from its messages never changes it.
  */
 async function sessionPageFor(directory: string, name: string, stderr: Writer): Promise<string | undefined> {
-  const { sessions } = await readSessions(directory, stderr);
-  const listed = sessions.find(({ path }) => transcriptName(directory, path) === name);
+  const named = (path: string) => transcriptName(directory, path) === name;
+  const { sessions } = await readSessions(directory, stderr, named);
+  const listed = sessions.find(({ path }) => named(path));
   if (listed === undefined) {
     return undefined;
   }
-  return sessionPage(listed.summary, displayedMessages(listed.lines));
+  return sessionPage(listed.summary, displayedMessages(listed.lines!));
 }
 
 /**

@@ -253,6 +253,7 @@ describe('claude-lens serve', () => {
         const session = await get(port, href);
         expect(session.status).toBe(200);
         expect(rows(session.body)).toEqual([row]);
+        expect(session.body).toContain(`<h1>Session ${row[0]}</h1>`);
       }
     } finally {
       await rm(dir, { recursive: true, force: true });
