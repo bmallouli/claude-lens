@@ -377,11 +377,12 @@ describe('claude-lens serve', () => {
       }
       expect(await snapshot(dir)).toEqual(before);
 
-      await appendFile(join(dir, 'b.jsonl'), JSON.stringify(said('assistant', 40, [{ type: 'text', text: 'b-late Needle' }])) + '\n');
+      await appendFile(join(dir, 'b.jsonl'), ['b-late Needle', 'b-later needle', 'b-last needle']
+        .map((late, second) => JSON.stringify(said('assistant', 40 + second, [{ type: 'text', text: late }])) + '\n').join(''));
       await writeFile(join(dir, 'one', 'd.jsonl'), transcript('D', '/work/d', 1.50, 30, 0, [said('user', 5, 'd-needle')]));
       const after = await snapshot(dir);
       expect((await search('needle')).map(({ id, count }) => [id, count])).toEqual([
-        ['A', '2 matching messages'], ['D', '1 matching message'], ['B', '1 matching message'], ['C', '1 matching message']]);
+        ['B', '3 matching messages'], ['A', '2 matching messages'], ['D', '1 matching message'], ['C', '1 matching message']]);
       expect(await snapshot(dir)).toEqual(after);
     } finally {
       await rm(dir, { recursive: true, force: true });
