@@ -1,9 +1,13 @@
-import { readdir } from 'node:fs/promises';
+import { readdir, readFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import type { Server, ServerResponse } from 'node:http';
+import { relative, sep } from 'node:path';
 
+import { displayedMessages } from './session/messages.js';
+import type { DisplayedMessage } from './session/messages.js';
+import type { SessionSummary } from './session/summarise.js';
 import { readSessions, reason, sessionColumns } from './sessions.js';
-import type { Writer } from './sessions.js';
+import type { ListedSession, Writer } from './sessions.js';
 
 /** The only address the sessions page listens on. */
 export const host = '127.0.0.1';
@@ -33,26 +37,91 @@ function reply(response: ServerResponse, status: number, body: string, headers: 
   response.end(body);
 }
 
-function page(directory: string, rows: string[][]): string {
-  const cells = (tag: string, values: string[]) => values.map((value) => `<${tag}>${value}</${tag}>`).join('');
+function document(title: string, body: string[]): string {
   return [
     '<!doctype html>',
     '<html lang="en">',
-    '<head><meta charset="utf-8"><title>claude-lens sessions</title></head>',
+    `<head><meta charset="utf-8"><title>${title}</title></head>`,
     '<body>',
-    `<h1>Sessions under ${html(directory)}</h1>`,
-    rows.length === 0 ? '<p>No sessions found.</p>' : [
-      '<table>',
-      `<thead><tr>${cells('th', headings)}</tr></thead>`,
-      '<tbody>',
-      ...rows.map((row) => `<tr>${cells('td', row)}</tr>`),
-      '</tbody>',
-      '</table>',
-    ].join('\n'),
+    ...body,
     '</body>',
     '</html>',
     '',
   ].join('\n');
+}
+
+function table(rows: string[][]): string {
+  const cells = (tag: string, values: string[]) => values.map((value) => `<${tag}>${value}</${tag}>`).join('');
+  return [
+    '<table>',
+    `<thead><tr>${cells('th', headings)}</tr></thead>`,
+    '<tbody>',
+    ...rows.map((row) => `<tr>${cells('td', row)}</tr>`),
+    '</tbody>',
+    '</table>',
+  ].join('\n');
+}
+
+/**
+ * What names a listed transcript in its page's URL: its path under
+ * `directory`, which no other listed transcript shares, whatever session ID
+ * either carries.
+ */
+function transcriptName(directory: string, path: string): string {
+  return relative(directory, path).split(sep).join('/');
+}
+
+/** A percent-encoded path segment decoded, or undefined when it is malformed. */
+function decoded(segment: string): string | undefined {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return undefined;
+  }
+}
+
+function page(directory: string, sessions: ListedSession[]): string {
+  const rows = sessions.map(({ path, summary }) => {
+    const [id, ...values] = sessionColumns(summary, html);
+    const href = `/sessions/${encodeURIComponent(transcriptName(directory, path))}`;
+    return [`<a href="${html(href)}">${id}</a>`, ...values];
+  });
+  return document('claude-lens sessions', [
+    `<h1>Sessions under ${html(directory)}</h1>`,
+    rows.length === 0 ? '<p>No sessions found.</p>' : table(rows),
+  ]);
+}
+
+function sessionPage(summary: SessionSummary, messages: DisplayedMessage[]): string {
+  const id = html(summary.sessionId ?? '-');
+  return document(`claude-lens session ${id}`, [
+    '<p><a href="/">All sessions</a></p>',
+    `<h1>Session ${id}</h1>`,
+    table([sessionColumns(summary, html)]),
+    '<h2>Messages</h2>',
+    messages.length === 0 ? '<p>No messages to display.</p>' : messages.map(({ timestamp, role, parts }) => [
+      '<article>',
+      `<h3><time>${html(timestamp ?? '-')}</time> ${role}</h3>`,
+      ...parts.map((part) => `<pre>${html(part)}</pre>`),
+      '</article>',
+    ].join('\n')).join('\n'),
+  ]);
+}
+
+/**
+ * The page for the listed transcript `name` names under `directory`, or
+ * undefined when no listed transcript has that name. The summary comes from
+ * the same discovery as the listing, so what the page omits from its messages
+ * never changes it.
+ */
+async function sessionPageFor(directory: string, name: string, stderr: Writer): Promise<string | undefined> {
+  const { sessions } = await readSessions(directory, stderr);
+  const listed = sessions.find(({ path }) => transcriptName(directory, path) === name);
+  if (listed === undefined) {
+    return undefined;
+  }
+  const text = await readFile(listed.path, 'utf8');
+  return sessionPage(listed.summary, displayedMessages(text.split(/\r?\n/)));
 }
 
 /**
@@ -71,7 +140,8 @@ async function checkDirectory(directory: string): Promise<void> {
 
 /**
  * Serve every session under `directory`, highest cost first, at `/` on
- * 127.0.0.1:`port` only. Each request rereads the transcripts and reports
+ * 127.0.0.1:`port` only, each linking to a page under `/sessions/` showing its
+ * summary and displayed messages. Each request rereads the transcripts and reports
  * omitted ones on `stderr`; nothing is ever written under `directory`.
  * Resolves once listening, or rejects when `directory` cannot be read or the
  * port cannot be bound.
@@ -89,7 +159,9 @@ export async function serveSessions(directory: string, port: number, stderr: Wri
       reply(response, 403, 'Forbidden: requests must name this server as 127.0.0.1 or localhost.\n');
       return;
     }
-    if (request.url?.split('?')[0] !== '/') {
+    const path = request.url?.split('?')[0] ?? '';
+    const name = path.startsWith('/sessions/') ? decoded(path.slice('/sessions/'.length)) : undefined;
+    if (path !== '/' && name === undefined) {
       reply(response, 404, 'Not found.\n');
       return;
     }
@@ -97,10 +169,16 @@ export async function serveSessions(directory: string, port: number, stderr: Wri
       reply(response, 405, 'Method not allowed.\n', { Allow: 'GET, HEAD' });
       return;
     }
-    readSessions(directory, stderr).then(
-      ({ sessions }) => {
-        const rows = sessions.map(({ summary }) => sessionColumns(summary, html));
-        reply(response, 200, page(directory, rows), { 'Content-Type': 'text/html; charset=utf-8' });
+    const answer = name === undefined
+      ? readSessions(directory, stderr).then(({ sessions }) => page(directory, sessions))
+      : sessionPageFor(directory, name, stderr);
+    answer.then(
+      (body) => {
+        if (body === undefined) {
+          reply(response, 404, 'Not found.\n');
+          return;
+        }
+        reply(response, 200, body, { 'Content-Type': 'text/html; charset=utf-8' });
       },
       (error: unknown) => {
         stderr.write(`${directory}: ${reason(error)}\n`);
