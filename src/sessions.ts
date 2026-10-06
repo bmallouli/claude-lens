@@ -60,9 +60,9 @@ export function reason(error: unknown): string {
 export interface ListedSession {
   path: string;
   /**
-   * The transcript's lines as read for `summary`, in file order; kept only
-   * for the transcripts the caller asks for, so a whole directory's text is
-   * never held at once.
+   * The transcript's lines as read for `summary`, in file order. Omitted by
+   * default and kept only for the transcripts the caller's `keepLines`
+   * accepts; the session page asks for the one transcript it shows.
    */
   lines?: string[];
   summary: SessionSummary;
