@@ -5,7 +5,7 @@ import { formatDuration } from './session/format-duration.js';
 import { summariseSession } from './session/summarise.js';
 import type { SessionSummary } from './session/summarise.js';
 
-type Writer = { write(chunk: string): unknown };
+export type Writer = { write(chunk: string): unknown };
 
 /**
  * Every `*.jsonl` file under `directory`, following symlinks to files but not
@@ -52,35 +52,28 @@ function cell(value: string): string {
     ({ '\\': '\\\\', '\t': '\\t', '\n': '\\n', '\r': '\\r' })[char]!);
 }
 
-function reason(error: unknown): string {
+export function reason(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** Print one tab-separated row per readable transcript, highest cost first, at most `limit` of them. */
-export async function listSessions(
+/** A readable transcript found under a directory, with its summary. */
+export interface ListedSession {
+  path: string;
+  summary: SessionSummary;
+}
+
+/**
+ * Summarise every readable transcript under `directory`, highest cost first,
+ * with how many transcripts were discovered, omitted ones included. A
+ * transcript that cannot be read, or holds unreadable records, is reported
+ * on stderr and omitted; a failure to read `directory` itself is thrown.
+ */
+export async function readSessions(
   directory: string,
-  stdout: Writer = process.stdout,
   stderr: Writer = process.stderr,
-  limit = Infinity,
-): Promise<number> {
-  let files: string[];
-  try {
-    files = await transcripts(directory, stderr);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      stdout.write(`no sessions found under ${directory}\n`);
-    } else {
-      stderr.write(`${directory}: ${reason(error)}\n`);
-    }
-    return 1;
-  }
-
-  if (files.length === 0) {
-    stdout.write(`no sessions found under ${directory}\n`);
-    return 0;
-  }
-
-  const sessions: { path: string; summary: SessionSummary }[] = [];
+): Promise<{ sessions: ListedSession[]; discovered: number }> {
+  const files = await transcripts(directory, stderr);
+  const sessions: ListedSession[] = [];
   // A transcript reached through both a symlink and its target is listed once.
   const seen = new Set<string>();
   for (const path of files) {
@@ -101,15 +94,52 @@ export async function listSessions(
   }
 
   sessions.sort((a, b) => b.summary.costUSD - a.summary.costUSD || a.path.localeCompare(b.path));
+  return { sessions, discovered: files.length };
+}
+
+/**
+ * The six values a session list shows for one session: session ID, working
+ * directory, dollar cost, total tokens, tool calls and elapsed time. `text`
+ * makes the transcript-sourced ID and directory safe for the output format.
+ */
+export function sessionColumns(summary: SessionSummary, text: (value: string) => string): string[] {
+  return [
+    text(summary.sessionId ?? '-'),
+    text(summary.cwd ?? '-'),
+    `$${summary.costUSD.toFixed(2)}`,
+    String(summary.totalTokens),
+    String(summary.toolCalls),
+    formatDuration(summary.durationMs),
+  ];
+}
+
+/** Print one tab-separated row per readable transcript, highest cost first, at most `limit` of them. */
+export async function listSessions(
+  directory: string,
+  stdout: Writer = process.stdout,
+  stderr: Writer = process.stderr,
+  limit = Infinity,
+): Promise<number> {
+  let sessions: ListedSession[];
+  let discovered: number;
+  try {
+    ({ sessions, discovered } = await readSessions(directory, stderr));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      stdout.write(`no sessions found under ${directory}\n`);
+    } else {
+      stderr.write(`${directory}: ${reason(error)}\n`);
+    }
+    return 1;
+  }
+
+  if (discovered === 0) {
+    stdout.write(`no sessions found under ${directory}\n`);
+    return 0;
+  }
+
   for (const { summary } of sessions.slice(0, limit)) {
-    stdout.write([
-      cell(summary.sessionId ?? '-'),
-      cell(summary.cwd ?? '-'),
-      `$${summary.costUSD.toFixed(2)}`,
-      summary.totalTokens,
-      summary.toolCalls,
-      formatDuration(summary.durationMs),
-    ].join('\t') + '\n');
+    stdout.write(sessionColumns(summary, cell).join('\t') + '\n');
   }
   return 0;
 }

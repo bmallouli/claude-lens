@@ -40,6 +40,48 @@ describe('claude-lens executable', () => {
     expect(result.stdout).toBe(`no sessions found under ${dir}\n`);
   });
 
+  it('prints the usage of every command for an unknown command', () => {
+    const result = run('nope');
+    expect(result.status).toBe(1);
+    expect(result.stderr).toBe('usage: claude-lens sessions <dir> [--limit <n>]\nusage: claude-lens serve <dir> [--port <n>]\n');
+  });
+
+  describe('serve', () => {
+    it.each([['abc'], ['0'], ['70000'], ['1.5'], []])('rejects --port %s with status 2', async (...value) => {
+      const dir = await mkdtemp(join(tmpdir(), 'claude-lens-'));
+      try {
+        const result = run('serve', dir, '--port', ...value);
+        expect(result.status).toBe(2);
+        expect(result.stdout).toBe('');
+        expect(result.stderr).toBe(`claude-lens serve: --port must be a whole number from 1 to 65535, got ${
+          value.length === 0 ? 'nothing' : `"${value[0]}"`}\nusage: claude-lens serve <dir> [--port <n>]\n`);
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('rejects a missing, nonexistent or non-directory target with status 1', async () => {
+      const dir = await mkdtemp(join(tmpdir(), 'claude-lens-'));
+      try {
+        const file = join(dir, 'file.jsonl');
+        await writeFile(file, '');
+        const missing = join(dir, 'missing');
+        for (const [args, stderr] of [
+          [[], 'claude-lens serve: missing <dir>\nusage: claude-lens serve <dir> [--port <n>]\n'],
+          [[missing], `claude-lens serve: ${missing}: no such directory\n`],
+          [[file], `claude-lens serve: ${file}: not a directory\n`],
+        ] as const) {
+          const result = run('serve', ...args);
+          expect(result.status).toBe(1);
+          expect(result.stdout).toBe('');
+          expect(result.stderr).toBe(stderr);
+        }
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+  });
+
   describe('--limit', () => {
     const transcript = (id: string, cost: number) => [
       JSON.stringify({ type: 'user', sessionId: id, cwd: '/w' }),
