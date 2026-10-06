@@ -348,6 +348,7 @@ describe('claude-lens serve', () => {
       const before = await snapshot(dir);
       const href = async (id: string) => links((await get(port)).body).find(({ row }) => row[0] === id)!.href;
       const search = async (q: string) => results((await get(port, `/search?q=${q}`)).body);
+      const find = async (phrase: string) => results((await get(port, `/search?${new URLSearchParams({ q: phrase })}`)).body);
 
       const found = await get(port, '/search?q=needle');
       expect(found.status).toBe(200);
@@ -367,6 +368,9 @@ describe('claude-lens serve', () => {
 
       expect(await search('haystack')).toEqual([{ id: 'B', href: await href('B'), count: '1 matching message',
         first: ['2026-01-01T00:00:20Z assistant', 'Bash {"command":"grep haystack"}'] }]);
+      expect(await find('Bash')).toEqual([{ id: 'B', href: await href('B'), count: '1 matching message',
+        first: ['2026-01-01T00:00:20Z assistant', 'Bash {"command":"grep haystack"}'] }]);
+      expect(await find('needle.*')).toEqual([]);
       expect(await search('needle+one')).toEqual([{ id: 'A', href: await href('A'), count: '1 matching message',
         first: ['2026-01-01T00:01:10Z user', 'Needle one'] }]);
       for (const excluded of ['needle%20result', 'b-thought', 'b-result', 'b-meta', 'b-side', 'b-mixed-result', 'b-mixed-thought', 'absent']) {
@@ -379,8 +383,14 @@ describe('claude-lens serve', () => {
 
       await appendFile(join(dir, 'b.jsonl'), ['b-late Needle', 'b-later needle', 'b-last needle']
         .map((late, second) => JSON.stringify(said('assistant', 40 + second, [{ type: 'text', text: late }])) + '\n').join(''));
-      await writeFile(join(dir, 'one', 'd.jsonl'), transcript('D', '/work/d', 1.50, 30, 0, [said('user', 5, 'd-needle')]));
+      await writeFile(join(dir, 'one', 'd.jsonl'), transcript('D', '/work/d', 1.50, 30, 0, [said('user', 5, 'd-needle'),
+        said('user', 50, 'd: 1+1 (twice)?')]));
       const after = await snapshot(dir);
+      expect(await find('1+1 (TWICE)?')).toEqual([{ id: 'D', href: await href('D'), count: '1 matching message',
+        first: ['2026-01-01T00:01:50Z user', 'd: 1+1 (twice)?'] }]);
+      for (const near of ['1 1 (twice)?', '1.1', '11', '1+1 twice']) {
+        expect(await find(near)).toEqual([]);
+      }
       expect((await search('needle')).map(({ id, count }) => [id, count])).toEqual([
         ['B', '3 matching messages'], ['A', '2 matching messages'], ['D', '1 matching message'], ['C', '1 matching message']]);
       expect(await snapshot(dir)).toEqual(after);
