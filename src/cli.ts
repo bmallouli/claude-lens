@@ -21,9 +21,14 @@ function splitArgs(args: string[], option: string): { positional: string[]; valu
   return { positional, values };
 }
 
+/** Whether an option value is a positive whole number written in decimal digits, however large. */
+function positiveWholeNumber(value: string | undefined): value is string {
+  return value !== undefined && /^\d+$/.test(value) && Number(value) >= 1;
+}
+
 function parseArgs(args: string[]): { dir: string; limit: number } | { exit: number } {
   const { positional, values } = splitArgs(args, '--limit');
-  if (values.some((value) => value === undefined || !/^\d+$/.test(value) || Number(value) < 1)) {
+  if (values.some((value) => !positiveWholeNumber(value))) {
     return { exit: 2 };
   }
   const limit = values.length > 0 ? Number(values.at(-1)) : Infinity;
@@ -33,7 +38,7 @@ function parseArgs(args: string[]): { dir: string; limit: number } | { exit: num
 function parseServeArgs(args: string[]): { dir: string; port: number } | { exit: number; problem: string } {
   const { positional, values } = splitArgs(args, '--port');
   for (const value of values) {
-    if (value === undefined || !/^\d+$/.test(value) || Number(value) < 1 || Number(value) > 65535) {
+    if (!positiveWholeNumber(value) || Number(value) > 65535) {
       const got = value === undefined ? 'nothing' : JSON.stringify(value);
       return { exit: 2, problem: `--port must be a whole number from 1 to 65535, got ${got}` };
     }

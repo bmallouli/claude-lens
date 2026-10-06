@@ -98,7 +98,7 @@ export async function serveSessions(directory: string, port: number, stderr: Wri
       return;
     }
     readSessions(directory, stderr).then(
-      (sessions) => {
+      ({ sessions }) => {
         const rows = sessions.map(({ summary }) => sessionColumns(summary, html));
         reply(response, 200, page(directory, rows), { 'Content-Type': 'text/html; charset=utf-8' });
       },

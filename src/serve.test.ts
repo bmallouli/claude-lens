@@ -10,6 +10,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 
+import { defaultPort, serveSessions } from './serve.js';
 import { sessionIds } from './test-support/session-ids.js';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
@@ -235,4 +236,37 @@ describe('claude-lens serve', () => {
     expect((await get(port)).status).toBe(500);
     expect(server.stderr()).toContain(`${dir}: ENOENT`);
   });
+});
+
+it('escapes hostile session and directory text and denies a foreign Host before discovery', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'claude-lens-&<script>-'));
+  const server = await serveSessions(dir, defaultPort, { write() {} });
+  const get = (host: string) => new Promise<{ status: number; body: string }>((resolve, reject) => {
+    request({ host: '127.0.0.1', port: defaultPort, headers: { Host: host }, agent: false }, (response) => {
+      let body = '';
+      response.setEncoding('utf8');
+      response.on('data', (chunk) => { body += chunk; });
+      response.on('end', () => resolve({ status: response.statusCode!, body }));
+    }).on('error', reject).end();
+  });
+  try {
+    await writeFile(join(dir, 'attack.jsonl'), JSON.stringify({
+      type: 'user', sessionId: '<img src="https://example.invalid/pixel">',
+      cwd: String.raw`/work/one\two & "three" 'four' <script>alert(1)</script>`,
+    }) + '\n');
+    const page = await get(`127.0.0.1:${defaultPort}`);
+    expect(page.status).toBe(200);
+    expect(page.body).toContain('<td>&lt;img src=&quot;https://example.invalid/pixel&quot;&gt;</td>');
+    expect(page.body).toContain(String.raw`<td>/work/one\two &amp; &quot;three&quot; &#39;four&#39; &lt;script&gt;alert(1)&lt;/script&gt;</td>`);
+    expect(page.body).toContain('claude-lens-&amp;&lt;script&gt;-');
+    expect(page.body).not.toContain('<img');
+    expect(page.body).not.toContain('<script>');
+
+    await rm(dir, { recursive: true, force: true });
+    expect(await get(`foreign.example:${defaultPort}`)).toMatchObject({ status: 403 });
+    expect((await get(`localhost:${defaultPort}`)).status).toBe(500);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    await rm(dir, { recursive: true, force: true });
+  }
 });

@@ -151,3 +151,21 @@ describe('sessions listing', () => {
     }
   });
 });
+
+it('keeps stdout empty when discovered transcripts are all omitted', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'claude-lens-omitted-'));
+  try {
+    const bad = join(dir, 'bad.jsonl');
+    await writeFile(bad, 'not json\n');
+    let stdout = '';
+    let stderr = '';
+    expect(await listSessions(dir,
+      { write(chunk: string) { stdout += chunk; } },
+      { write(chunk: string) { stderr += chunk; } },
+    )).toBe(0);
+    expect(stderr).toBe(`${bad}: 1 unreadable JSONL record(s)\n`);
+    expect(stdout).toBe('');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

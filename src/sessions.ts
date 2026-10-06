@@ -63,11 +63,15 @@ export interface ListedSession {
 }
 
 /**
- * Summarise every readable transcript under `directory`, highest cost first.
- * A transcript that cannot be read, or holds unreadable records, is reported
+ * Summarise every readable transcript under `directory`, highest cost first,
+ * with how many transcripts were discovered, omitted ones included. A
+ * transcript that cannot be read, or holds unreadable records, is reported
  * on stderr and omitted; a failure to read `directory` itself is thrown.
  */
-export async function readSessions(directory: string, stderr: Writer = process.stderr): Promise<ListedSession[]> {
+export async function readSessions(
+  directory: string,
+  stderr: Writer = process.stderr,
+): Promise<{ sessions: ListedSession[]; discovered: number }> {
   const files = await transcripts(directory, stderr);
   const sessions: ListedSession[] = [];
   // A transcript reached through both a symlink and its target is listed once.
@@ -90,7 +94,7 @@ export async function readSessions(directory: string, stderr: Writer = process.s
   }
 
   sessions.sort((a, b) => b.summary.costUSD - a.summary.costUSD || a.path.localeCompare(b.path));
-  return sessions;
+  return { sessions, discovered: files.length };
 }
 
 /**
@@ -117,8 +121,9 @@ export async function listSessions(
   limit = Infinity,
 ): Promise<number> {
   let sessions: ListedSession[];
+  let discovered: number;
   try {
-    sessions = await readSessions(directory, stderr);
+    ({ sessions, discovered } = await readSessions(directory, stderr));
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
       stdout.write(`no sessions found under ${directory}\n`);
@@ -128,7 +133,7 @@ export async function listSessions(
     return 1;
   }
 
-  if (sessions.length === 0) {
+  if (discovered === 0) {
     stdout.write(`no sessions found under ${directory}\n`);
     return 0;
   }
