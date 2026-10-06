@@ -17,10 +17,11 @@ const headings = ['Session ID', 'Working directory', 'Cost', 'Tokens', 'Tool cal
 
 /**
  * Every response forbids loading anything — scripts, styles, images, frames
- * — so the page can never fetch content from another origin.
+ * — so the page can never fetch content from another origin, and lets forms
+ * submit only to this server.
  */
 const securityHeaders = {
-  'Content-Security-Policy': "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+  'Content-Security-Policy': "default-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
   'X-Content-Type-Options': 'nosniff',
   'Referrer-Policy': 'no-referrer',
   'Cache-Control': 'no-store',
@@ -80,16 +81,36 @@ function decoded(segment: string): string | undefined {
   }
 }
 
+/** A link, labelled with already-safe `label`, to the page of the transcript at `path`. */
+function sessionLink(directory: string, path: string, label: string): string {
+  const href = `/sessions/${encodeURIComponent(transcriptName(directory, path))}`;
+  return `<a href="${html(href)}">${label}</a>`;
+}
+
+/** The form that searches every session's displayed messages, holding `phrase`. */
+function searchForm(phrase = ''): string {
+  return `<form method="get" action="/search"><input type="text" name="q" value="${html(phrase)}"> <button type="submit">Search messages</button></form>`;
+}
+
 function page(directory: string, sessions: ListedSession[]): string {
   const rows = sessions.map(({ path, summary }) => {
     const [id, ...values] = sessionColumns(summary, html);
-    const href = `/sessions/${encodeURIComponent(transcriptName(directory, path))}`;
-    return [`<a href="${html(href)}">${id}</a>`, ...values];
+    return [sessionLink(directory, path, id!), ...values];
   });
   return document('claude-lens sessions', [
     `<h1>Sessions under ${html(directory)}</h1>`,
+    searchForm(),
     rows.length === 0 ? '<p>No sessions found.</p>' : table(rows),
   ]);
+}
+
+function article({ timestamp, role, parts }: DisplayedMessage): string {
+  return [
+    '<article>',
+    `<h3><time>${html(timestamp ?? '-')}</time> ${role}</h3>`,
+    ...parts.map((part) => `<pre>${html(part)}</pre>`),
+    '</article>',
+  ].join('\n');
 }
 
 function sessionPage(summary: SessionSummary, messages: DisplayedMessage[]): string {
@@ -99,11 +120,33 @@ function sessionPage(summary: SessionSummary, messages: DisplayedMessage[]): str
     `<h1>Session ${columns[0]}</h1>`,
     table([columns]),
     '<h2>Messages</h2>',
-    messages.length === 0 ? '<p>No messages to display.</p>' : messages.map(({ timestamp, role, parts }) => [
-      '<article>',
-      `<h3><time>${html(timestamp ?? '-')}</time> ${role}</h3>`,
-      ...parts.map((part) => `<pre>${html(part)}</pre>`),
-      '</article>',
+    messages.length === 0 ? '<p>No messages to display.</p>' : messages.map(article).join('\n'),
+  ]);
+}
+
+/**
+ * Every session under `directory` with a displayed message containing
+ * `phrase`, ignoring case, most matching messages first, each with how many
+ * of its messages match and the first of them. Only what a session page shows
+ * is searched: a message matches when one of its parts contains the phrase.
+ */
+async function searchPage(directory: string, phrase: string, stderr: Writer): Promise<string> {
+  const { sessions } = await readSessions(directory, stderr, () => true);
+  const wanted = phrase.toLowerCase();
+  const results = sessions.flatMap(({ path, lines, summary }) => {
+    const matching = displayedMessages(lines!).filter(({ parts }) => parts.some((part) => part.toLowerCase().includes(wanted)));
+    return matching.length === 0 ? [] : [{ path, summary, matching }];
+  }).sort((a, b) => b.matching.length - a.matching.length);
+  return document(`claude-lens search "${html(phrase)}"`, [
+    '<p><a href="/">All sessions</a></p>',
+    `<h1>Sessions matching "${html(phrase)}"</h1>`,
+    searchForm(phrase),
+    results.length === 0 ? `<p>no session matches "${html(phrase)}"</p>` : results.map(({ path, summary, matching }) => [
+      '<section>',
+      `<h2>${sessionLink(directory, path, sessionColumns(summary, html)[0]!)}</h2>`,
+      `<p>${matching.length} matching message${matching.length === 1 ? '' : 's'}</p>`,
+      article(matching[0]!),
+      '</section>',
     ].join('\n')).join('\n'),
   ]);
 }
@@ -141,7 +184,8 @@ async function checkDirectory(directory: string): Promise<void> {
 /**
  * Serve every session under `directory`, highest cost first, at `/` on
  * 127.0.0.1:`port` only, each linking to a page under `/sessions/` showing its
- * summary and displayed messages. Each request rereads the transcripts and reports
+ * summary and displayed messages, which `/search?q=` searches across sessions.
+ * Each request rereads the transcripts and reports
  * omitted ones on `stderr`; nothing is ever written under `directory`.
  * Resolves once listening, or rejects when `directory` cannot be read or the
  * port cannot be bound.
@@ -159,9 +203,11 @@ export async function serveSessions(directory: string, port: number, stderr: Wri
       reply(response, 403, 'Forbidden: requests must name this server as 127.0.0.1 or localhost.\n');
       return;
     }
-    const path = request.url?.split('?')[0] ?? '';
+    const url = request.url ?? '';
+    const path = url.split('?')[0]!;
     const name = path.startsWith('/sessions/') ? decoded(path.slice('/sessions/'.length)) : undefined;
-    if (path !== '/' && name === undefined) {
+    const search = path === '/search';
+    if (path !== '/' && !search && name === undefined) {
       reply(response, 404, 'Not found.\n');
       return;
     }
@@ -169,9 +215,17 @@ export async function serveSessions(directory: string, port: number, stderr: Wri
       reply(response, 405, 'Method not allowed.\n', { Allow: 'GET, HEAD' });
       return;
     }
-    const answer = name === undefined
-      ? readSessions(directory, stderr).then(({ sessions }) => page(directory, sessions))
-      : sessionPageFor(directory, name, stderr);
+    // The search form submits `q` as form data, so `+` reads as a space.
+    const phrase = new URLSearchParams(url.slice(path.length)).get('q') ?? '';
+    if (search && phrase === '') {
+      reply(response, 302, 'Found.\n', { Location: '/' });
+      return;
+    }
+    const answer = search
+      ? searchPage(directory, phrase, stderr)
+      : name === undefined
+        ? readSessions(directory, stderr).then(({ sessions }) => page(directory, sessions))
+        : sessionPageFor(directory, name, stderr);
     answer.then(
       (body) => {
         if (body === undefined) {
