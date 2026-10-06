@@ -1,4 +1,4 @@
-import { readdir, readFile } from 'node:fs/promises';
+import { readdir } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import type { Server, ServerResponse } from 'node:http';
 import { relative, sep } from 'node:path';
@@ -93,11 +93,11 @@ function page(directory: string, sessions: ListedSession[]): string {
 }
 
 function sessionPage(summary: SessionSummary, messages: DisplayedMessage[]): string {
-  const id = html(summary.sessionId ?? '-');
-  return document(`claude-lens session ${id}`, [
+  const columns = sessionColumns(summary, html);
+  return document(`claude-lens session ${columns[0]}`, [
     '<p><a href="/">All sessions</a></p>',
-    `<h1>Session ${id}</h1>`,
-    table([sessionColumns(summary, html)]),
+    `<h1>Session ${columns[0]}</h1>`,
+    table([columns]),
     '<h2>Messages</h2>',
     messages.length === 0 ? '<p>No messages to display.</p>' : messages.map(({ timestamp, role, parts }) => [
       '<article>',
@@ -111,8 +111,8 @@ function sessionPage(summary: SessionSummary, messages: DisplayedMessage[]): str
 /**
  * The page for the listed transcript `name` names under `directory`, or
  * undefined when no listed transcript has that name. The summary comes from
- * the same discovery as the listing, so what the page omits from its messages
- * never changes it.
+ * the same discovery as the listing, and the messages from the very lines that
+ * summary counted, so what the page omits from its messages never changes it.
  */
 async function sessionPageFor(directory: string, name: string, stderr: Writer): Promise<string | undefined> {
   const { sessions } = await readSessions(directory, stderr);
@@ -120,8 +120,7 @@ async function sessionPageFor(directory: string, name: string, stderr: Writer): 
   if (listed === undefined) {
     return undefined;
   }
-  const text = await readFile(listed.path, 'utf8');
-  return sessionPage(listed.summary, displayedMessages(text.split(/\r?\n/)));
+  return sessionPage(listed.summary, displayedMessages(listed.lines));
 }
 
 /**

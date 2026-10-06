@@ -59,6 +59,8 @@ export function reason(error: unknown): string {
 /** A readable transcript found under a directory, with its summary. */
 export interface ListedSession {
   path: string;
+  /** The transcript's lines as read for `summary`, in file order. */
+  lines: string[];
   summary: SessionSummary;
 }
 
@@ -82,12 +84,13 @@ export async function readSessions(
       if (seen.has(real)) continue;
       seen.add(real);
       const text = await readFile(path, 'utf8');
-      const summary = summariseSession(text.split(/\r?\n/));
+      const lines = text.split(/\r?\n/);
+      const summary = summariseSession(lines);
       if (summary.unreadable > 0) {
         stderr.write(`${path}: ${summary.unreadable} unreadable JSONL record(s)\n`);
         continue;
       }
-      sessions.push({ path, summary });
+      sessions.push({ path, lines, summary });
     } catch (error) {
       stderr.write(`${path}: ${reason(error)}\n`);
     }
