@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 
 import { formatDuration } from './session/format-duration.js';
 import { summariseSession } from './session/summarise.js';
-import { listSessions } from './sessions.js';
+import { listSessions, readSessions } from './sessions.js';
 import { sessionIds } from './test-support/session-ids.js';
 
 function capture() {
@@ -165,6 +165,39 @@ it('keeps stdout empty when discovered transcripts are all omitted', async () =>
     )).toBe(0);
     expect(stderr).toBe(`${bad}: 1 unreadable JSONL record(s)\n`);
     expect(stdout).toBe('');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+it('retains no transcript lines by default and only the selected transcript lines on request', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'claude-lens-retention-'));
+  const stderr = { write() {} };
+  const cheap = join(dir, 'cheap.jsonl');
+  const costly = join(dir, 'costly.jsonl');
+  const cheapLine = JSON.stringify({ type: 'user', sessionId: 'cheap', message: { content: 'question' } });
+  const costlyLine = JSON.stringify({ type: 'assistant', sessionId: 'costly', costUSD: 2,
+    message: { content: [{ type: 'text', text: 'answer' }] } });
+  try {
+    await writeFile(cheap, cheapLine + '\r\n');
+    await writeFile(costly, costlyLine + '\n');
+    await writeFile(join(dir, 'bad.jsonl'), 'not json\n');
+
+    const ordinary = await readSessions(dir, stderr);
+    expect(ordinary.discovered).toBe(3);
+    expect(ordinary.sessions.map(({ path }) => path)).toEqual([costly, cheap]);
+    for (const session of ordinary.sessions) {
+      expect(session).not.toHaveProperty('lines');
+    }
+
+    const selected = await readSessions(dir, stderr, (path) => path === cheap);
+    expect(selected.discovered).toBe(ordinary.discovered);
+    expect(selected.sessions.map(({ summary }) => summary)).toEqual(ordinary.sessions.map(({ summary }) => summary));
+    expect(selected.sessions[0]).not.toHaveProperty('lines');
+    expect(selected.sessions[1]?.lines).toEqual([cheapLine, '']);
+
+    const all = await readSessions(dir, stderr, () => true);
+    expect(all.sessions.map(({ lines }) => lines)).toEqual([[costlyLine, ''], [cheapLine, '']]);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

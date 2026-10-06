@@ -26,7 +26,12 @@ export interface SessionSummary {
   unreadable: number;
 }
 
-type TranscriptRecord = Record<string, unknown>;
+export type TranscriptRecord = Record<string, unknown>;
+
+/** Whether a parsed JSON value is an object, as every record and content block is. */
+export function isRecord(value: unknown): value is TranscriptRecord {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
 
 /** A record's `timestamp` both as written and as the instant it names. */
 interface Stamp {
@@ -41,7 +46,7 @@ interface Stamp {
  * holds — a truncated write, a bare `42`, `null`, an array — is unreadable
  * rather than a record with nothing in it.
  */
-function parseRecord(line: string): TranscriptRecord | undefined {
+export function parseRecord(line: string): TranscriptRecord | undefined {
   let parsed: unknown;
   try {
     parsed = JSON.parse(line);
@@ -56,7 +61,7 @@ function parseRecord(line: string): TranscriptRecord | undefined {
   return parsed as TranscriptRecord;
 }
 
-function stringField(record: TranscriptRecord, key: string): string | undefined {
+export function stringField(record: TranscriptRecord, key: string): string | undefined {
   const value = record[key];
   return typeof value === 'string' ? value : undefined;
 }
@@ -88,11 +93,9 @@ function modelOf(record: TranscriptRecord): string | undefined {
   return stringField(message as TranscriptRecord, 'model');
 }
 
-function objectField(record: TranscriptRecord, key: string): TranscriptRecord | undefined {
+export function objectField(record: TranscriptRecord, key: string): TranscriptRecord | undefined {
   const value = record[key];
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? value as TranscriptRecord
-    : undefined;
+  return isRecord(value) ? value : undefined;
 }
 
 function nonNegativeNumber(record: TranscriptRecord, key: string): number {
@@ -174,9 +177,7 @@ export function summariseSession(lines: string[]): SessionSummary {
         }
         const content = message['content'];
         if (Array.isArray(content)) {
-          toolCalls += content.filter((block: unknown) =>
-            typeof block === 'object' && block !== null && !Array.isArray(block) &&
-            (block as TranscriptRecord)['type'] === 'tool_use').length;
+          toolCalls += content.filter((block: unknown) => isRecord(block) && block['type'] === 'tool_use').length;
         }
       }
     }

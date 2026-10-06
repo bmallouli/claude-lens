@@ -1,6 +1,6 @@
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
-import { mkdir, mkdtemp, readdir, readFile, readlink, rm, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, mkdtemp, readdir, readFile, readlink, rm, writeFile } from 'node:fs/promises';
 import { request } from 'node:http';
 import type { IncomingHttpHeaders } from 'node:http';
 import { connect, createServer } from 'node:net';
@@ -30,11 +30,34 @@ function transcript(id: string, cwd: string, cost: number, tokens: number, tools
   ].join('\n') + '\n';
 }
 
+/**
+ * Session B ($1.00): a question, a thinking-only reply, an answer, the same turn's separate Bash
+ * call, its tool-result-only reply, a meta record, a sidechain reply and a final answer. The
+ * question also carries a tool result and the final answer a thinking block, neither shown.
+ */
+function transcriptB(): string {
+  const assistant = (second: number, content: unknown[], extra: object = {}) => ({ type: 'assistant', sessionId: 'B',
+    timestamp: `2026-01-01T00:00:${second}Z`, costUSD: 0.25, message: { usage: { input_tokens: 4, output_tokens: 1 }, content },
+    ...extra });
+  return [
+    { type: 'user', sessionId: 'B', cwd: '/work/b', timestamp: '2026-01-01T00:00:00Z', message: { role: 'user', content: [
+      { type: 'tool_result', tool_use_id: 'earlier', content: 'b-mixed-result' }, { type: 'text', text: 'b-question' }] } },
+    assistant(10, [{ type: 'thinking', thinking: 'b-thought' }]),
+    assistant(20, [{ type: 'text', text: 'b-answer' }]),
+    assistant(20, [{ type: 'tool_use', id: 'bash', name: 'Bash', input: { command: 'grep haystack' } }]),
+    { type: 'user', sessionId: 'B', timestamp: '2026-01-01T00:00:30Z', message: { role: 'user', content: [
+      { type: 'tool_result', tool_use_id: 'bash', content: 'b-result' }] } },
+    { type: 'user', sessionId: 'B', isMeta: true, timestamp: '2026-01-01T00:00:40Z', message: { role: 'user', content: 'b-meta' } },
+    assistant(50, [{ type: 'text', text: 'b-side' }], { isSidechain: true, costUSD: 0 }),
+    assistant(59, [{ type: 'thinking', thinking: 'b-mixed-thought' }, { type: 'text', text: 'b-final <b>x</b>' }]),
+  ].map((record) => JSON.stringify(record)).join('\n') + '\n';
+}
+
 /** Sessions A ($2.10), B ($1.00), C ($0.40, two directories deep) and one malformed transcript. */
 async function fixture(): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), 'claude-lens-serve-'));
   await mkdir(join(dir, 'one', 'two'), { recursive: true });
-  await writeFile(join(dir, 'b.jsonl'), transcript('B', '/work/b', 1.00, 20, 2));
+  await writeFile(join(dir, 'b.jsonl'), transcriptB());
   await writeFile(join(dir, 'one', 'a.jsonl'), transcript('A', '/work/a', 2.10, 40, 3));
   await writeFile(join(dir, 'one', 'two', 'c.jsonl'), transcript('C', '<i>c</i>', 0.40, 10, 1));
   await writeFile(join(dir, 'bad.jsonl'), 'not json\n');
@@ -88,12 +111,34 @@ function get(port: number, path = '/', options: { host?: string; method?: string
   });
 }
 
-/** The listing's rows, each as the six literal values its cells show. */
-function rows(body: string): string[][] {
-  const text = (cell: string) => cell.replace(/&(lt|gt|quot|#39|amp);/g, (_, name: string) =>
+/** HTML text read back as the literal text it shows. */
+function text(markup: string): string {
+  return markup.replace(/<[^>]*>/g, '').replace(/&(lt|gt|quot|#39|amp);/g, (_, name: string) =>
     ({ lt: '<', gt: '>', quot: '"', '#39': "'", amp: '&' })[name]!);
+}
+
+/** A page's table rows, each as the six literal values its cells show. */
+function rows(body: string): string[][] {
   return [...body.matchAll(/<tr>((?:<td>.*?<\/td>)+)<\/tr>/g)]
     .map((row) => [...row[1]!.matchAll(/<td>(.*?)<\/td>/g)].map((cell) => text(cell[1]!)));
+}
+
+/** The page each listing row links to, by the row's literal values. */
+function links(body: string): { row: string[]; href: string }[] {
+  return [...body.matchAll(/<tr><td><a href="([^"]*)">.*?<\/tr>/g)]
+    .map((match) => ({ row: rows(match[0])[0]!, href: text(match[1]!) }));
+}
+
+/** A session page's messages, each as its timestamp and role line followed by its literal parts. */
+function messages(body: string): string[][] {
+  return [...body.matchAll(/<article>\n(.*?)\n<\/article>/gs)].map((article) =>
+    [...article[1]!.matchAll(/<(h3|pre)>(.*?)<\/\1>/gs)].map((part) => text(part[2]!)));
+}
+
+/** The terminal `sessions` row for the session with ID `id`. */
+function terminalRow(dir: string, id: string): string[] {
+  const terminal = spawnSync(process.execPath, [cli, 'sessions', dir], { encoding: 'utf8', env });
+  return terminal.stdout.trimEnd().split('\n').map((row) => row.split('\t')).find((row) => row[0] === id)!;
 }
 
 /** Every local address and port a process listens on for TCP, read from the kernel's socket tables. */
@@ -191,6 +236,71 @@ describe('claude-lens serve', () => {
     }
   });
 
+  it('links every listed session to its own page, even when IDs repeat or are missing', async () => {
+    const dir = await fixture();
+    try {
+      await mkdir(join(dir, 'copy'));
+      await writeFile(join(dir, 'copy', 'b.jsonl'), transcript('B', '/work/b-copy', 0.70, 12, 0));
+      await writeFile(join(dir, 'none.jsonl'), JSON.stringify({ type: 'user', cwd: '/work/none' }) + '\n');
+      const port = await freePort();
+      await launch(dir, '--port', String(port));
+
+      const listed = links((await get(port)).body);
+      expect(listed.map(({ row }) => row[0])).toEqual(['A', 'B', 'B', 'C', '-']);
+      expect(new Set(listed.map(({ href }) => href)).size).toBe(5);
+      for (const { row, href } of listed) {
+        expect(href).toMatch(/^\/sessions\/[^/]+$/);
+        const session = await get(port, href);
+        expect(session.status).toBe(200);
+        expect(rows(session.body)).toEqual([row]);
+        expect(session.body).toContain(`<h1>Session ${row[0]}</h1>`);
+      }
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("shows a session's summary, then its displayed messages, rereading on each request", async () => {
+    const dir = await fixture();
+    try {
+      const port = await freePort();
+      await launch(dir, '--port', String(port));
+      const before = await snapshot(dir);
+      const { href } = links((await get(port)).body).find(({ row }) => row[0] === 'B')!;
+
+      const session = await get(port, href);
+      expect(session.status).toBe(200);
+      expect(session.headers['content-type']).toBe('text/html; charset=utf-8');
+      expect(rows(session.body)).toEqual([terminalRow(dir, 'B')]);
+      expect(session.body.indexOf('</table>')).toBeLessThan(session.body.indexOf('<article>'));
+      expect(messages(session.body)).toEqual([
+        ['2026-01-01T00:00:00Z user', 'b-question'],
+        ['2026-01-01T00:00:20Z assistant', 'b-answer'],
+        ['2026-01-01T00:00:20Z assistant', 'Bash {"command":"grep haystack"}'],
+        ['2026-01-01T00:00:59Z assistant', 'b-final <b>x</b>'],
+      ]);
+      for (const excluded of ['b-thought', 'b-result', 'b-meta', 'b-side', 'b-mixed-result', 'b-mixed-thought']) {
+        expect(session.body).not.toContain(excluded);
+      }
+      expect(session.body).toContain('<pre>b-final &lt;b&gt;x&lt;/b&gt;</pre>');
+      expect(session.body).not.toContain('<b>');
+      expect(session.body).not.toMatch(/(?:src|href)\s*=\s*["']?\s*https?:/i);
+      expect(session.headers['content-security-policy']).toMatch(/^default-src 'none'(;|$)/);
+      expect(await snapshot(dir)).toEqual(before);
+
+      await appendFile(join(dir, 'b.jsonl'), JSON.stringify({ type: 'assistant', sessionId: 'B',
+        timestamp: '2026-01-01T00:01:30Z', costUSD: 0.20, message: { usage: { input_tokens: 7 }, content: [{ type: 'text', text: 'b-late' }] } }) + '\n');
+      const after = await snapshot(dir);
+      const updated = await get(port, href);
+      expect(messages(updated.body)).toEqual([...messages(session.body), ['2026-01-01T00:01:30Z assistant', 'b-late']]);
+      expect(rows(updated.body)).toEqual([terminalRow(dir, 'B')]);
+      expect(rows(updated.body)).not.toEqual(rows(session.body));
+      expect(await snapshot(dir)).toEqual(after);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it('shows transcript text literally and loads nothing from another origin', async () => {
     const dir = await fixture();
     try {
@@ -221,7 +331,15 @@ describe('claude-lens serve', () => {
         const refused = await get(port, '/', { host });
         expect(refused.status).toBe(403);
         expect(refused.body).not.toContain('/work/a');
+        expect(await get(port, '/sessions/b.jsonl', { host })).toMatchObject({ status: 403, body: expect.not.stringContaining('b-question') });
       }
+
+      expect((await get(port, '/sessions/b.jsonl')).status).toBe(200);
+      for (const unknown of ['/sessions/not-a-session', '/sessions/', '/sessions/bad.jsonl', '/sessions/%E0%A4%A']) {
+        expect((await get(port, unknown)).status).toBe(404);
+      }
+      expect((await get(port, '/sessions/b.jsonl', { method: 'POST' })).status).toBe(405);
+      expect(await get(port, '/sessions/b.jsonl', { method: 'HEAD' })).toMatchObject({ status: 200, body: '' });
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -241,8 +359,8 @@ describe('claude-lens serve', () => {
 it('escapes hostile session and directory text and denies a foreign Host before discovery', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'claude-lens-&<script>-'));
   const server = await serveSessions(dir, defaultPort, { write() {} });
-  const get = (host: string) => new Promise<{ status: number; body: string }>((resolve, reject) => {
-    request({ host: '127.0.0.1', port: defaultPort, headers: { Host: host }, agent: false }, (response) => {
+  const get = (host: string, path = '/') => new Promise<{ status: number; body: string }>((resolve, reject) => {
+    request({ host: '127.0.0.1', port: defaultPort, path, headers: { Host: host }, agent: false }, (response) => {
       let body = '';
       response.setEncoding('utf8');
       response.on('data', (chunk) => { body += chunk; });
@@ -250,17 +368,25 @@ it('escapes hostile session and directory text and denies a foreign Host before 
     }).on('error', reject).end();
   });
   try {
-    await writeFile(join(dir, 'attack.jsonl'), JSON.stringify({
+    await writeFile(join(dir, `attack #?%'"<i>.jsonl`), JSON.stringify({
       type: 'user', sessionId: '<img src="https://example.invalid/pixel">',
       cwd: String.raw`/work/one\two & "three" 'four' <script>alert(1)</script>`,
     }) + '\n');
     const page = await get(`127.0.0.1:${defaultPort}`);
     expect(page.status).toBe(200);
-    expect(page.body).toContain('<td>&lt;img src=&quot;https://example.invalid/pixel&quot;&gt;</td>');
+    expect(page.body).toContain('">&lt;img src=&quot;https://example.invalid/pixel&quot;&gt;</a></td>');
     expect(page.body).toContain(String.raw`<td>/work/one\two &amp; &quot;three&quot; &#39;four&#39; &lt;script&gt;alert(1)&lt;/script&gt;</td>`);
     expect(page.body).toContain('claude-lens-&amp;&lt;script&gt;-');
     expect(page.body).not.toContain('<img');
     expect(page.body).not.toContain('<script>');
+
+    const [{ row, href }] = links(page.body) as [{ row: string[]; href: string }];
+    expect(href).toBe(`/sessions/attack%20%23%3F%25'%22%3Ci%3E.jsonl`);
+    const session = await get(`127.0.0.1:${defaultPort}`, href);
+    expect(session.status).toBe(200);
+    expect(rows(session.body)).toEqual([row]);
+    expect(session.body).not.toContain('<img');
+    expect(session.body).not.toContain('<script>');
 
     await rm(dir, { recursive: true, force: true });
     expect(await get(`foreign.example:${defaultPort}`)).toMatchObject({ status: 403 });

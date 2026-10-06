@@ -59,6 +59,12 @@ export function reason(error: unknown): string {
 /** A readable transcript found under a directory, with its summary. */
 export interface ListedSession {
   path: string;
+  /**
+   * The transcript's lines as read for `summary`, in file order. Omitted by
+   * default and kept only for the transcripts the caller's `keepLines`
+   * accepts; the session page asks for the one transcript it shows.
+   */
+  lines?: string[];
   summary: SessionSummary;
 }
 
@@ -67,10 +73,12 @@ export interface ListedSession {
  * with how many transcripts were discovered, omitted ones included. A
  * transcript that cannot be read, or holds unreadable records, is reported
  * on stderr and omitted; a failure to read `directory` itself is thrown.
+ * Only the transcripts whose path `keepLines` accepts keep their lines.
  */
 export async function readSessions(
   directory: string,
   stderr: Writer = process.stderr,
+  keepLines: (path: string) => boolean = () => false,
 ): Promise<{ sessions: ListedSession[]; discovered: number }> {
   const files = await transcripts(directory, stderr);
   const sessions: ListedSession[] = [];
@@ -82,12 +90,13 @@ export async function readSessions(
       if (seen.has(real)) continue;
       seen.add(real);
       const text = await readFile(path, 'utf8');
-      const summary = summariseSession(text.split(/\r?\n/));
+      const lines = text.split(/\r?\n/);
+      const summary = summariseSession(lines);
       if (summary.unreadable > 0) {
         stderr.write(`${path}: ${summary.unreadable} unreadable JSONL record(s)\n`);
         continue;
       }
-      sessions.push({ path, summary });
+      sessions.push(keepLines(path) ? { path, lines, summary } : { path, summary });
     } catch (error) {
       stderr.write(`${path}: ${reason(error)}\n`);
     }
