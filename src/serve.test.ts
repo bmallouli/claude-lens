@@ -21,13 +21,19 @@ beforeAll(() => {
   execFileSync(join(root, 'node_modules', '.bin', 'tsc'), ['-p', 'tsconfig.build.json'], { cwd: root });
 }, 60_000);
 
-function transcript(id: string, cwd: string, cost: number, tokens: number, tools: number): string {
+function transcript(id: string, cwd: string, cost: number, tokens: number, tools: number, records: object[] = []): string {
   return [
-    JSON.stringify({ type: 'user', sessionId: id, cwd, timestamp: '2026-01-01T00:00:00Z' }),
-    JSON.stringify({ type: 'assistant', timestamp: '2026-01-01T00:02:30Z', costUSD: cost,
+    { type: 'user', sessionId: id, cwd, timestamp: '2026-01-01T00:00:00Z' },
+    ...records,
+    { type: 'assistant', timestamp: '2026-01-01T00:02:30Z', costUSD: cost,
       message: { usage: { input_tokens: tokens - 5, output_tokens: 5 },
-        content: Array.from({ length: tools }, () => ({ type: 'tool_use' })) } }),
-  ].join('\n') + '\n';
+        content: Array.from({ length: tools }, () => ({ type: 'tool_use' })) } },
+  ].map((record) => JSON.stringify(record)).join('\n') + '\n';
+}
+
+/** A user or assistant record holding `content`, which costs nothing. */
+function said(type: 'user' | 'assistant', second: number, content: unknown): object {
+  return { type, timestamp: `2026-01-01T00:01:${second}Z`, message: { role: type, content } };
 }
 
 /**
@@ -53,13 +59,24 @@ function transcriptB(): string {
   ].map((record) => JSON.stringify(record)).join('\n') + '\n';
 }
 
-/** Sessions A ($2.10), B ($1.00), C ($0.40, two directories deep) and one malformed transcript. */
+/**
+ * Sessions A ($2.10), B ($1.00), C ($0.40, two directories deep) and one malformed transcript. A
+ * shows `Needle one`, then `needle two` (which repeats it), with a tool-result-only record
+ * between them also holding `needle`; C shows one message holding it, as markup; B shows none.
+ */
 async function fixture(): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), 'claude-lens-serve-'));
   await mkdir(join(dir, 'one', 'two'), { recursive: true });
   await writeFile(join(dir, 'b.jsonl'), transcriptB());
-  await writeFile(join(dir, 'one', 'a.jsonl'), transcript('A', '/work/a', 2.10, 40, 3));
-  await writeFile(join(dir, 'one', 'two', 'c.jsonl'), transcript('C', '<i>c</i>', 0.40, 10, 1));
+  await writeFile(join(dir, 'one', 'a.jsonl'), transcript('A', '/work/a', 2.10, 40, 3, [
+    said('user', 10, 'Needle one'),
+    said('user', 20, [{ type: 'tool_result', tool_use_id: 'earlier', content: 'a needle result' }]),
+    said('assistant', 30, [{ type: 'text', text: 'needle two, needle again' }]),
+  ]));
+  await writeFile(join(dir, 'one', 'two', 'c.jsonl'), transcript('C', '<i>c</i>', 0.40, 10, 1, [
+    said('assistant', 10, [{ type: 'text', text: 'c-intro' }]),
+    said('assistant', 20, [{ type: 'text', text: 'c <b>NEEDLE</b>' }]),
+  ]));
   await writeFile(join(dir, 'bad.jsonl'), 'not json\n');
   return dir;
 }
@@ -133,6 +150,12 @@ function links(body: string): { row: string[]; href: string }[] {
 function messages(body: string): string[][] {
   return [...body.matchAll(/<article>\n(.*?)\n<\/article>/gs)].map((article) =>
     [...article[1]!.matchAll(/<(h3|pre)>(.*?)<\/\1>/gs)].map((part) => text(part[2]!)));
+}
+
+/** A search page's results, each as its session ID, link, count line and first matching message. */
+function results(body: string): { id: string; href: string; count: string; first: string[] }[] {
+  return [...body.matchAll(/<section>\n<h2><a href="([^"]*)">(.*?)<\/a><\/h2>\n<p>(.*?)<\/p>\n(<article>.*?<\/article>)\n<\/section>/gs)]
+    .map((match) => ({ id: text(match[2]!), href: text(match[1]!), count: text(match[3]!), first: messages(match[4]!)[0]! }));
 }
 
 /** The terminal `sessions` row for the session with ID `id`. */
@@ -317,6 +340,80 @@ describe('claude-lens serve', () => {
     }
   });
 
+  it('searches every displayed message, counting matching messages per session, rereading on each request', async () => {
+    const dir = await fixture();
+    try {
+      const port = await freePort();
+      await launch(dir, '--port', String(port));
+      const before = await snapshot(dir);
+      const href = async (id: string) => links((await get(port)).body).find(({ row }) => row[0] === id)!.href;
+      const search = async (q: string) => results((await get(port, `/search?q=${q}`)).body);
+
+      const found = await get(port, '/search?q=needle');
+      expect(found.status).toBe(200);
+      expect(found.headers['content-type']).toBe('text/html; charset=utf-8');
+      expect(results(found.body)).toEqual([
+        { id: 'A', href: await href('A'), count: '2 matching messages', first: ['2026-01-01T00:01:10Z user', 'Needle one'] },
+        { id: 'C', href: await href('C'), count: '1 matching message', first: ['2026-01-01T00:01:20Z assistant', 'c <b>NEEDLE</b>'] },
+      ]);
+      expect(found.body).not.toContain('needle two');
+      expect(found.body).toContain('<pre>c &lt;b&gt;NEEDLE&lt;/b&gt;</pre>');
+      expect(found.body).not.toContain('<b>');
+      for (const { id, href } of results(found.body)) {
+        const session = await get(port, href);
+        expect(session.status).toBe(200);
+        expect(session.body).toContain(`<h1>Session ${id}</h1>`);
+      }
+
+      expect(await search('haystack')).toEqual([{ id: 'B', href: await href('B'), count: '1 matching message',
+        first: ['2026-01-01T00:00:20Z assistant', 'Bash {"command":"grep haystack"}'] }]);
+      expect(await search('needle+one')).toEqual([{ id: 'A', href: await href('A'), count: '1 matching message',
+        first: ['2026-01-01T00:01:10Z user', 'Needle one'] }]);
+      for (const excluded of ['needle%20result', 'b-thought', 'b-result', 'b-meta', 'b-side', 'b-mixed-result', 'b-mixed-thought', 'absent']) {
+        const none = await get(port, `/search?q=${excluded}`);
+        expect(none.status).toBe(200);
+        expect(results(none.body)).toEqual([]);
+        expect(text(none.body)).toContain(`no session matches "${decodeURIComponent(excluded)}"`);
+      }
+      expect(await snapshot(dir)).toEqual(before);
+
+      await appendFile(join(dir, 'b.jsonl'), JSON.stringify(said('assistant', 40, [{ type: 'text', text: 'b-late Needle' }])) + '\n');
+      await writeFile(join(dir, 'one', 'd.jsonl'), transcript('D', '/work/d', 1.50, 30, 0, [said('user', 5, 'd-needle')]));
+      const after = await snapshot(dir);
+      expect((await search('needle')).map(({ id, count }) => [id, count])).toEqual([
+        ['A', '2 matching messages'], ['D', '1 matching message'], ['B', '1 matching message'], ['C', '1 matching message']]);
+      expect(await snapshot(dir)).toEqual(after);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('submits searches from a same-origin form, shows the phrase literally and redirects an empty one', async () => {
+    const dir = await fixture();
+    try {
+      const port = await freePort();
+      await launch(dir, '--port', String(port));
+
+      expect((await get(port)).body).toContain('<form method="get" action="/search"><input type="text" name="q" value="">');
+      for (const path of ['/', '/sessions/b.jsonl', '/search?q=needle', '/search?q=absent', '/search?q=']) {
+        const { headers, body } = await get(port, path);
+        expect(headers['content-security-policy']).toMatch(/^default-src 'none';(?:.*; )?form-action 'self'(?:;|$)/);
+        expect(body).not.toMatch(/(?:src|href|action)\s*=\s*["']?\s*https?:/i);
+      }
+
+      const script = await get(port, '/search?q=%3Cscript%3E');
+      expect(script.status).toBe(200);
+      expect(script.body).toContain('<p>no session matches "&lt;script&gt;"</p>');
+      expect(script.body).not.toContain('<script');
+
+      for (const empty of ['/search?q=', '/search']) {
+        expect(await get(port, empty)).toMatchObject({ status: 302, headers: { location: '/' } });
+      }
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it('answers 404 for unknown routes, 405 for other methods and 403 for a foreign Host', async () => {
     const dir = await fixture();
     try {
@@ -340,6 +437,11 @@ describe('claude-lens serve', () => {
       }
       expect((await get(port, '/sessions/b.jsonl', { method: 'POST' })).status).toBe(405);
       expect(await get(port, '/sessions/b.jsonl', { method: 'HEAD' })).toMatchObject({ status: 200, body: '' });
+
+      expect((await get(port, '/search/?q=needle')).status).toBe(404);
+      expect((await get(port, '/search?q=needle', { method: 'POST' })).status).toBe(405);
+      expect(await get(port, '/search?q=needle', { method: 'HEAD' })).toMatchObject({ status: 200, body: '' });
+      expect(await get(port, '/search?q=needle', { host: 'rebound.example' })).toMatchObject({ status: 403, body: expect.not.stringContaining('Needle') });
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
