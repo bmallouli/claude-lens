@@ -1,9 +1,9 @@
-import { execFileSync, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { sessionIds } from './test-support/session-ids.js';
 
@@ -14,10 +14,6 @@ function run(...args: string[]) {
 }
 
 describe('claude-lens executable', () => {
-  beforeAll(() => {
-    execFileSync(join(root, 'node_modules', '.bin', 'tsc'), ['-p', 'tsconfig.build.json'], { cwd: root });
-  }, 60_000);
-
   it('lists sessions under a directory and exits 0', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'claude-lens-'));
     try {

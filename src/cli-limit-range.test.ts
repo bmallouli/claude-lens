@@ -1,14 +1,10 @@
-import { execFileSync, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { beforeAll, expect, it } from 'vitest';
+import { expect, it } from 'vitest';
 
 const root = process.cwd();
-
-beforeAll(() => {
-  execFileSync(join(root, 'node_modules', '.bin', 'tsc'), ['-p', 'tsconfig.build.json'], { cwd: root });
-}, 60_000);
 
 it.each(['9007199254740992', '1' + '0'.repeat(310)])('accepts positive whole-number limit %s without an upper bound', async (limit) => {
   const dir = await mkdtemp(join(tmpdir(), 'claude-lens-'));

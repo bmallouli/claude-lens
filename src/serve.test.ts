@@ -1,4 +1,4 @@
-import { execFileSync, spawn, spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import { appendFile, mkdir, mkdtemp, readdir, readFile, readlink, rm, writeFile } from 'node:fs/promises';
 import { request } from 'node:http';
@@ -8,7 +8,7 @@ import type { AddressInfo } from 'node:net';
 import { networkInterfaces, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import { defaultPort, serveSessions } from './serve.js';
 import { sessionIds } from './test-support/session-ids.js';
@@ -16,10 +16,6 @@ import { sessionIds } from './test-support/session-ids.js';
 const root = fileURLToPath(new URL('..', import.meta.url));
 const cli = join(root, 'dist', 'cli.js');
 const env = { ...process.env, NODE_USE_ENV_PROXY: '0' };
-
-beforeAll(() => {
-  execFileSync(join(root, 'node_modules', '.bin', 'tsc'), ['-p', 'tsconfig.build.json'], { cwd: root });
-}, 60_000);
 
 function transcript(id: string, cwd: string, cost: number, tokens: number, tools: number, records: object[] = []): string {
   return [
