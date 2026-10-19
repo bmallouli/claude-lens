@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { readFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 
 import { defaultPort, host, serveSessions } from './serve.js';
@@ -81,6 +82,10 @@ if (command === 'serve') {
   serve(rest);
 } else if (command === '--help' || command === '-h' || command === 'help') {
   process.stdout.write(usage + serveUsage);
+} else if (command === '--version' || command === '-v' || command === 'version') {
+  // The package.json the executable ships beside (dist/cli.js -> package.json), read at run time.
+  const { version } = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version: string };
+  process.stdout.write(`claude-lens ${version}\n`);
 } else {
   const parsed = command === 'sessions' ? parseArgs(rest) : { exit: 1, problem: undefined };
   if ('exit' in parsed) {
