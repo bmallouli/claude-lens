@@ -1,4 +1,4 @@
-import { execFileSync, spawn, spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import { appendFile, mkdir, mkdtemp, readdir, readFile, readlink, rm, writeFile } from 'node:fs/promises';
 import { request } from 'node:http';
@@ -8,7 +8,7 @@ import type { AddressInfo } from 'node:net';
 import { networkInterfaces, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import { defaultPort, serveSessions } from './serve.js';
 import { sessionIds } from './test-support/session-ids.js';
@@ -16,10 +16,6 @@ import { sessionIds } from './test-support/session-ids.js';
 const root = fileURLToPath(new URL('..', import.meta.url));
 const cli = join(root, 'dist', 'cli.js');
 const env = { ...process.env, NODE_USE_ENV_PROXY: '0' };
-
-beforeAll(() => {
-  execFileSync(join(root, 'node_modules', '.bin', 'tsc'), ['-p', 'tsconfig.build.json'], { cwd: root });
-}, 60_000);
 
 function transcript(id: string, cwd: string, cost: number, tokens: number, tools: number, records: object[] = []): string {
   return [
@@ -254,6 +250,32 @@ describe('claude-lens serve', () => {
       const after = await snapshot(dir);
       expect(rows((await get(port)).body).map((row) => row[0])).toEqual(['A', 'D', 'B', 'C']);
       expect(await snapshot(dir)).toEqual(after);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('says how many sessions it lists between the search form and the table, and no count when none is found', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'claude-lens-serve-'));
+    try {
+      const port = await freePort();
+      await launch(dir, '--port', String(port));
+      const counts = (body: string) => [...body.matchAll(/<p>[^<]*\d[^<]*<\/p>/g)];
+
+      const empty = (await get(port)).body;
+      expect(empty).toContain('<p>No sessions found.</p>');
+      expect(counts(empty)).toEqual([]);
+
+      const ids = ['A', 'B', 'C'];
+      for (const [index, expected] of ['1 session', '2 sessions', '3 sessions'].entries()) {
+        await writeFile(join(dir, `${ids[index]}.jsonl`), transcript(ids[index]!, '/work', 1, 10, 0));
+        const { body } = await get(port);
+        const found = counts(body);
+        expect(found.map((count) => text(count[0]))).toEqual([expected]);
+        expect(body.indexOf('</form>')).toBeLessThan(found[0]!.index);
+        expect(found[0]!.index).toBeLessThan(body.indexOf('<table>'));
+        expect(rows(body).map((row) => row[0]).sort()).toEqual(ids.slice(0, index + 1));
+      }
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
