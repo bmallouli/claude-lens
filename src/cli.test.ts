@@ -118,7 +118,17 @@ describe('claude-lens executable', () => {
       const result = run('sessions', dir, '--limit', ...value);
       expect(result.status).toBe(2);
       expect(result.stdout).toBe('');
-      expect(result.stderr).toBe('usage: claude-lens sessions <dir> [--limit <n>]\n');
+      expect(result.stderr).toBe(`claude-lens sessions: --limit must be a whole number of 1 or more, got ${
+        value.length === 0 ? 'nothing' : `"${value[0]}"`}\nusage: claude-lens sessions <dir> [--limit <n>]\n`);
+    }));
+
+    it('names a missing or extra <dir> with status 1', () => withDir((dir) => {
+      for (const [args, problem] of [[[], 'missing <dir>'], [[dir, dir], 'expected one <dir>']] as const) {
+        const result = run('sessions', ...args);
+        expect(result.status).toBe(1);
+        expect(result.stdout).toBe('');
+        expect(result.stderr).toBe(`claude-lens sessions: ${problem}\nusage: claude-lens sessions <dir> [--limit <n>]\n`);
+      }
     }));
   });
 });

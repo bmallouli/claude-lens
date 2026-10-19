@@ -26,27 +26,34 @@ function positiveWholeNumber(value: string | undefined): value is string {
   return value !== undefined && /^\d+$/.test(value) && Number(value) >= 1;
 }
 
-function parseArgs(args: string[]): { dir: string; limit: number } | { exit: number } {
-  const { positional, values } = splitArgs(args, '--limit');
-  if (values.some((value) => !positiveWholeNumber(value))) {
-    return { exit: 2 };
-  }
-  const limit = values.length > 0 ? Number(values.at(-1)) : Infinity;
-  return positional.length === 1 ? { dir: positional[0]!, limit } : { exit: 1 };
-}
-
-function parseServeArgs(args: string[]): { dir: string; port: number } | { exit: number; problem: string } {
-  const { positional, values } = splitArgs(args, '--port');
+/**
+ * Parse `<dir> [<option> <n>]...`, naming the first problem found: an option value `accepts` refuses
+ * (exit 2, described by `rule`) before a missing or extra `<dir>` (exit 1). The last value given wins.
+ */
+function parseDirArgs(args: string[], option: string, accepts: (value: string | undefined) => boolean, rule: string):
+  { dir: string; value: string | undefined } | { exit: number; problem: string } {
+  const { positional, values } = splitArgs(args, option);
   for (const value of values) {
-    if (!positiveWholeNumber(value) || Number(value) > 65535) {
+    if (!accepts(value)) {
       const got = value === undefined ? 'nothing' : JSON.stringify(value);
-      return { exit: 2, problem: `--port must be a whole number from 1 to 65535, got ${got}` };
+      return { exit: 2, problem: `${option} must be ${rule}, got ${got}` };
     }
   }
   if (positional.length !== 1) {
     return { exit: 1, problem: positional.length === 0 ? 'missing <dir>' : 'expected one <dir>' };
   }
-  return { dir: positional[0]!, port: values.length > 0 ? Number(values.at(-1)) : defaultPort };
+  return { dir: positional[0]!, value: values.at(-1) };
+}
+
+function parseArgs(args: string[]): { dir: string; limit: number } | { exit: number; problem: string } {
+  const parsed = parseDirArgs(args, '--limit', positiveWholeNumber, 'a whole number of 1 or more');
+  return 'exit' in parsed ? parsed : { dir: parsed.dir, limit: parsed.value === undefined ? Infinity : Number(parsed.value) };
+}
+
+function parseServeArgs(args: string[]): { dir: string; port: number } | { exit: number; problem: string } {
+  const parsed = parseDirArgs(args, '--port', (value) => positiveWholeNumber(value) && Number(value) <= 65535,
+    'a whole number from 1 to 65535');
+  return 'exit' in parsed ? parsed : { dir: parsed.dir, port: parsed.value === undefined ? defaultPort : Number(parsed.value) };
 }
 
 function serve(args: string[]): void {
@@ -73,9 +80,9 @@ const [command, ...rest] = process.argv.slice(2);
 if (command === 'serve') {
   serve(rest);
 } else {
-  const parsed = command === 'sessions' ? parseArgs(rest) : { exit: 1 };
+  const parsed = command === 'sessions' ? parseArgs(rest) : { exit: 1, problem: undefined };
   if ('exit' in parsed) {
-    process.stderr.write(command === 'sessions' ? usage : usage + serveUsage);
+    process.stderr.write(parsed.problem === undefined ? usage + serveUsage : `claude-lens sessions: ${parsed.problem}\n${usage}`);
     process.exitCode = parsed.exit;
   } else {
     listSessions(parsed.dir, process.stdout, process.stderr, parsed.limit).then(
