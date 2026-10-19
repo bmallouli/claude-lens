@@ -92,6 +92,11 @@ function searchForm(phrase = ''): string {
   return `<form method="get" action="/search"><input type="text" name="q" value="${html(phrase)}"> <button type="submit">Search messages</button></form>`;
 }
 
+/** `count` followed by `noun`, which takes an `s` unless `count` is 1. */
+function counted(count: number, noun: string): string {
+  return `${count} ${noun}${count === 1 ? '' : 's'}`;
+}
+
 function page(directory: string, sessions: ListedSession[]): string {
   const rows = sessions.map(({ path, summary }) => {
     const [id, ...values] = sessionColumns(summary, html);
@@ -100,7 +105,7 @@ function page(directory: string, sessions: ListedSession[]): string {
   return document('claude-lens sessions', [
     `<h1>Sessions under ${html(directory)}</h1>`,
     searchForm(),
-    rows.length === 0 ? '<p>No sessions found.</p>' : table(rows),
+    ...(rows.length === 0 ? ['<p>No sessions found.</p>'] : [`<p>${counted(rows.length, 'session')}</p>`, table(rows)]),
   ]);
 }
 
@@ -144,7 +149,7 @@ async function searchPage(directory: string, phrase: string, stderr: Writer): Pr
     results.length === 0 ? `<p>no session matches "${html(phrase)}"</p>` : results.map(({ path, summary, matching }) => [
       '<section>',
       `<h2>${sessionLink(directory, path, sessionColumns(summary, html)[0]!)}</h2>`,
-      `<p>${matching.length} matching message${matching.length === 1 ? '' : 's'}</p>`,
+      `<p>${counted(matching.length, 'matching message')}</p>`,
       article(matching[0]!),
       '</section>',
     ].join('\n')).join('\n'),

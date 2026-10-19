@@ -259,6 +259,32 @@ describe('claude-lens serve', () => {
     }
   });
 
+  it('says how many sessions it lists between the search form and the table, and no count when none is found', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'claude-lens-serve-'));
+    try {
+      const port = await freePort();
+      await launch(dir, '--port', String(port));
+      const counts = (body: string) => [...body.matchAll(/<p>[^<]*\d[^<]*<\/p>/g)];
+
+      const empty = (await get(port)).body;
+      expect(empty).toContain('<p>No sessions found.</p>');
+      expect(counts(empty)).toEqual([]);
+
+      const ids = ['A', 'B', 'C'];
+      for (const [index, expected] of ['1 session', '2 sessions', '3 sessions'].entries()) {
+        await writeFile(join(dir, `${ids[index]}.jsonl`), transcript(ids[index]!, '/work', 1, 10, 0));
+        const { body } = await get(port);
+        const found = counts(body);
+        expect(found.map((count) => text(count[0]))).toEqual([expected]);
+        expect(body.indexOf('</form>')).toBeLessThan(found[0]!.index);
+        expect(found[0]!.index).toBeLessThan(body.indexOf('<table>'));
+        expect(rows(body).map((row) => row[0]).sort()).toEqual(ids.slice(0, index + 1));
+      }
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it('links every listed session to its own page, even when IDs repeat or are missing', async () => {
     const dir = await fixture();
     try {
