@@ -40,10 +40,18 @@ describe('claude-lens executable', () => {
     expect(result.stdout).toBe(`no sessions found under ${dir}\n`);
   });
 
-  it('prints the usage of every command for an unknown command', () => {
-    const result = run('nope');
+  it.each([[], ['nope']])('prints the usage of every command to stderr with status 1 for %j', (...args) => {
+    const result = run(...args);
     expect(result.status).toBe(1);
+    expect(result.stdout).toBe('');
     expect(result.stderr).toBe('usage: claude-lens sessions <dir> [--limit <n>]\nusage: claude-lens serve <dir> [--port <n>]\n');
+  });
+
+  it.each(['--help', '-h', 'help'])('prints the usage of every command to stdout with status 0 for %s', (arg) => {
+    const result = run(arg);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe('usage: claude-lens sessions <dir> [--limit <n>]\nusage: claude-lens serve <dir> [--port <n>]\n');
+    expect(result.stderr).toBe('');
   });
 
   describe('serve', () => {

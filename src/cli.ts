@@ -79,6 +79,8 @@ const [command, ...rest] = process.argv.slice(2);
 
 if (command === 'serve') {
   serve(rest);
+} else if (command === '--help' || command === '-h' || command === 'help') {
+  process.stdout.write(usage + serveUsage);
 } else {
   const parsed = command === 'sessions' ? parseArgs(rest) : { exit: 1, problem: undefined };
   if ('exit' in parsed) {
