@@ -1,5 +1,15 @@
 {
   "browser": {
     "image": "chromedp/headless-shell:156.0.8078.36@sha256:53cc0f33c0598ff244f6e45458f6dfaf0ae4206d388ae7364903afd1d9d14f0a"
+  },
+  "redis": {
+    "image": "redis:7.4@sha256:4fa24486b8bcca8eec45ee0eb166edc674795e53a2b53d1a9ef263eecebaac85",
+    "user": "redis",
+    "port": 6379,
+    "variable": "REDIS_URL",
+    "value": "redis://127.0.0.1:6379/0",
+    "writable": [
+      "/data"
+    ]
   }
 }
