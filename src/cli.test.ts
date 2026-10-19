@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -47,6 +48,14 @@ describe('claude-lens executable', () => {
     const result = run(arg);
     expect(result.status).toBe(0);
     expect(result.stdout).toBe('usage: claude-lens sessions <dir> [--limit <n>]\nusage: claude-lens serve <dir> [--port <n>]\n');
+    expect(result.stderr).toBe('');
+  });
+
+  it.each(['--version', '-v', 'version'])('prints the package version to stdout with status 0 for %s', (arg) => {
+    const { version } = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as { version: string };
+    const result = run(arg);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe(`claude-lens ${version}\n`);
     expect(result.stderr).toBe('');
   });
 
