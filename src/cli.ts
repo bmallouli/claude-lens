@@ -7,6 +7,7 @@ import { listSessions, reason } from './sessions.js';
 
 const usage = 'usage: claude-lens sessions <dir> [--limit <n>]\n';
 const serveUsage = 'usage: claude-lens serve <dir> [--port <n>]\n';
+const versionUsage = 'usage: claude-lens --version\n';
 
 /** Split `<dir> [<option> <value>]...` arguments; every value given for `option` is kept, in order. */
 function splitArgs(args: string[], option: string): { positional: string[]; values: (string | undefined)[] } {
@@ -81,7 +82,7 @@ const [command, ...rest] = process.argv.slice(2);
 if (command === 'serve') {
   serve(rest);
 } else if (command === '--help' || command === '-h' || command === 'help') {
-  process.stdout.write(usage + serveUsage);
+  process.stdout.write(usage + serveUsage + versionUsage);
 } else if (command === '--version' || command === '-v' || command === 'version') {
   // The package.json the executable ships beside (dist/cli.js -> package.json), read at run time.
   const { version } = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version: string };
@@ -89,7 +90,7 @@ if (command === 'serve') {
 } else {
   const parsed = command === 'sessions' ? parseArgs(rest) : { exit: 1, problem: undefined };
   if ('exit' in parsed) {
-    process.stderr.write(parsed.problem === undefined ? usage + serveUsage : `claude-lens sessions: ${parsed.problem}\n${usage}`);
+    process.stderr.write(parsed.problem === undefined ? usage + serveUsage + versionUsage : `claude-lens sessions: ${parsed.problem}\n${usage}`);
     process.exitCode = parsed.exit;
   } else {
     listSessions(parsed.dir, process.stdout, process.stderr, parsed.limit).then(
