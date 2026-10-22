@@ -77,6 +77,13 @@ describe('.forge/runner.Dockerfile', () => {
       expect(before.filter((i) => i.keyword === 'WORKDIR').at(-1)?.args).toBe('/');
     });
 
+    it(`has corepack's pnpm shim enabled before USER runner and ${packageManager} prepared as runner through the proxy`, () => {
+      const user = before.findLastIndex((i) => i.keyword === 'USER');
+      const runs = (from: number, to: number) => before.slice(from, to).filter((i) => i.keyword === 'RUN').map((i) => i.args);
+      expect(runs(0, user).some((args) => /(^|&&\s*)corepack enable pnpm(\s*&&|$)/.test(args))).toBe(true);
+      expect(runs(user, before.length)).toContain(`NODE_USE_ENV_PROXY=1 corepack prepare ${packageManager} --activate`);
+    });
+
     it(`passes when id -u prints 1001, git --version exits 0, node is v22 and pnpm is ${packageManager}`, async () => {
       expect((await check(good)).status).toBe(0);
     });
