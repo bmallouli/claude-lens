@@ -61,6 +61,18 @@ describe('claude-lens executable', () => {
     expect(result.stderr).toBe('');
   });
 
+  it('is documented in one README sentence, right after the help sentence', () => {
+    const sentences = readFileSync(join(root, 'README.md'), 'utf8').split(/\n+|(?<=\.)\s+(?=[A-Z`])/);
+    const names = (sentence: string, ...args: string[]) => args.every((arg) => sentence.includes(`\`${arg}\``));
+    const documented = sentences.filter((sentence) => names(sentence, '--version', '-v', 'version'));
+    expect(documented).toHaveLength(1);
+    const sentence = documented[0] ?? '';
+    expect(sentence).toContain('`claude-lens <version>`');
+    expect(sentence).toContain('package.json declares');
+    expect(sentence).toContain('on stdout and exit 0');
+    expect(names(sentences[sentences.indexOf(sentence) - 1] ?? '', '--help', '-h', 'help')).toBe(true);
+  });
+
   describe('serve', () => {
     it.each([['abc'], ['0'], ['70000'], ['1.5'], []])('rejects --port %s with status 2', async (...value) => {
       const dir = await mkdtemp(join(tmpdir(), 'claude-lens-'));
