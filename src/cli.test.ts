@@ -32,7 +32,10 @@ describe('claude-lens executable', () => {
     const result = run('sessions', 'src/test-support/transcripts');
     expect(result.status).toBe(0);
     expect(result.stderr).toBe('');
-    expect(result.stdout).toBe('short-session\t/work/claude-lens\t$0.25\t1234\t2\t2m 5s\n');
+    expect(result.stdout).toBe(
+      'two-models\t/work/claude-lens\t$0.75\t900\t1\t1h 30m\n' +
+      'short-session\t/work/claude-lens\t$0.25\t1234\t2\t2m 5s\n',
+    );
   });
 
   it('exits 1 for a missing directory', async () => {
