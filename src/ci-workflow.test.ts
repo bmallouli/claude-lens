@@ -16,9 +16,3 @@ describe('.github/workflows/ci.yml', () => {
     expect(triggers[push + 1]).toBe('    branches: [main, "forge/merge-train/**"]');
   });
 });
-
-describe('the GitHub Actions run attempt', () => {
-  it('fails on the first attempt of a run and passes on every other', () => {
-    expect(process.env.GITHUB_RUN_ATTEMPT).not.toBe('1');
-  });
-});
