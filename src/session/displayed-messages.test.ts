@@ -33,6 +33,14 @@ describe('displayedMessages', () => {
     ]);
   });
 
+  it('leaves out records holding only thinking or only a tool result', () => {
+    expect(displayedMessages([
+      line({ type: 'assistant', timestamp: 't1', message: { content: [{ type: 'thinking', thinking: 'hidden' }] } }),
+      line({ type: 'user', timestamp: 't2', message: { content: [{ type: 'tool_result', content: 'hidden-result' }] } }),
+      line({ type: 'assistant', message: { content: [{ type: 'text', text: 'kept' }] } }),
+    ])).toEqual([{ timestamp: null, role: 'assistant', parts: ['kept'] }]);
+  });
+
   it('keeps records split from one turn as separate messages', () => {
     const record = (text: string) => line({ type: 'assistant', timestamp: 't', message: { content: [{ type: 'text', text }] } });
     expect(displayedMessages([record('a'), record('b')]).map(({ parts }) => parts)).toEqual([['a'], ['b']]);
