@@ -11,7 +11,7 @@ import { sessionIds } from './test-support/session-ids.js';
 const root = fileURLToPath(new URL('..', import.meta.url));
 
 function run(...args: string[]) {
-  return spawnSync(process.execPath, [join(root, 'dist', 'cli.js'), ...args], { encoding: 'utf8', env: { ...process.env, NODE_USE_ENV_PROXY: '0' } });
+  return spawnSync(process.execPath, [join(root, 'dist', 'cli.js'), ...args], { cwd: root, encoding: 'utf8', env: { ...process.env, NODE_USE_ENV_PROXY: '0' } });
 }
 
 describe('claude-lens executable', () => {
@@ -26,6 +26,16 @@ describe('claude-lens executable', () => {
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
+  });
+
+  it('lists the committed sample transcripts from the repository root, costliest first', () => {
+    const result = run('sessions', 'src/test-support/transcripts');
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe('');
+    expect(result.stdout).toBe(
+      'two-models\t/work/claude-lens\t$0.75\t900\t1\t1h 30m\n' +
+      'short-session\t/work/claude-lens\t$0.25\t1234\t2\t2m 5s\n',
+    );
   });
 
   it('exits 1 for a missing directory', async () => {
