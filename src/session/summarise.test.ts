@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+
 import { describe, expect, it } from 'vitest';
 
 import { summariseSession } from './summarise.js';
@@ -30,6 +32,25 @@ describe('summariseSession', () => {
       totalTokens: 0,
       toolCalls: 0,
       unreadable: 2,
+    });
+  });
+
+  it('summarises the committed two-models sample transcript', () => {
+    const text = readFileSync(new URL('../test-support/transcripts/two-models.jsonl', import.meta.url), 'utf8');
+
+    expect(summariseSession(text.split(/\r?\n/))).toEqual({
+      sessionId: 'two-models',
+      cwd: '/work/claude-lens',
+      startedAt: '2026-01-02T09:00:00.000Z',
+      endedAt: '2026-01-02T10:30:00.000Z',
+      durationMs: 5_400_000,
+      userMessages: 2,
+      assistantMessages: 2,
+      models: ['claude-sonnet-4-5', 'claude-haiku-4-5'],
+      costUSD: 0.75,
+      totalTokens: 900,
+      toolCalls: 1,
+      unreadable: 0,
     });
   });
 
