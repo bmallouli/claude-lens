@@ -84,6 +84,22 @@ describe('sessions listing', () => {
     }
   });
 
+  it('prints a message for a directory holding files but no transcript', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'claude-lens-'));
+    try {
+      await writeFile(join(dir, 'notes.txt'), 'notes\n');
+      await writeFile(join(dir, 'session.json'), '{}\n');
+
+      const stdout = capture();
+      const stderr = capture();
+      expect(await listSessions(dir, stdout, stderr)).toBe(0);
+      expect(stdout.text).toBe(`no sessions found under ${dir}\n`);
+      expect(stderr.text).toBe('');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it('prints a message for a missing directory with an unsuccessful exit', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'claude-lens-'));
     await rm(dir, { recursive: true });
