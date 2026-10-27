@@ -23,6 +23,11 @@ describe('formatDuration', () => {
     expect(formatDuration(3_600_000)).toBe('1h 0m');
   });
 
+  it('keeps counting hours across the whole-day boundary', () => {
+    expect(formatDuration(86_399_999)).toBe('23h 59m');
+    expect(formatDuration(86_400_000)).toBe('24h 0m');
+  });
+
   it('counts hours past a day rather than rolling over into days', () => {
     expect(formatDuration(90_061_000)).toBe('25h 1m');
   });
